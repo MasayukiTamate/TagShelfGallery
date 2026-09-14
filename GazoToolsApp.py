@@ -393,34 +393,64 @@ def create_folder_list_window(parent, folders):
     return win, lb
 
 def create_tag_editor_window(parent):
-    """常に表示するタグ編集・付与窓を作成する。"""
+    """常に表示するタグ編集・付与窓を作成する。連続入力に向いたUIにする。"""
     win = tk.Toplevel(parent)
     win.title("タグ編集")
     win.attributes("-topmost", True)
-    win.geometry("360x180")
+    win.geometry("380x260")
 
     tk.Label(win, text="対象画像:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
     target_var = tk.StringVar(value="未選択")
     tag_edit_window_target_var = target_var
-    tk.Label(win, textvariable=target_var, wraplength=320, justify="left", anchor="w").pack(fill="x", padx=10)
+    tk.Label(win, textvariable=target_var, wraplength=340, justify="left", anchor="w").pack(fill="x", padx=10)
 
     tk.Label(win, text="タグ（; 区切り）:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
     tag_var = tk.StringVar(value="")
     tag_edit_window_tag_var = tag_var
-    tk.Entry(win, textvariable=tag_var, width=40).pack(fill="x", padx=10)
+    entry = tk.Entry(win, textvariable=tag_var, width=40)
+    entry.pack(fill="x", padx=10)
+    entry.focus_set()
+
+    status_var = tk.StringVar(value="保存は Enter または 下のボタン")
+    tk.Label(win, textvariable=status_var, fg="#555555", anchor="w", font=("MS Gothic", 8)).pack(fill="x", padx=10, pady=(4, 0))
+
+    quick_frame = tk.Frame(win)
+    quick_frame.pack(fill="x", padx=10, pady=(6, 0))
+    tk.Label(quick_frame, text="よく使うタグ:", anchor="w").pack(fill="x")
+    quick_tags = collect_all_tags(GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {})
+    quick_tags = sorted(quick_tags)[:12]
+    quick_inner = tk.Frame(quick_frame)
+    quick_inner.pack(fill="x")
+
+    def append_tag(tag_name):
+        current = (tag_var.get() or "").strip()
+        parts = [p.strip() for p in current.split(";") if p.strip()] if current else []
+        if tag_name not in parts:
+            parts.append(tag_name)
+        tag_var.set("; ".join(parts))
+        entry.focus_set()
+        entry.icursor(len(tag_var.get()))
+
+    for tag_name in quick_tags:
+        tk.Button(quick_inner, text=tag_name, font=("MS Gothic", 8), command=lambda t=tag_name: append_tag(t), padx=6, pady=2).pack(side=tk.LEFT, padx=2, pady=2)
 
     def save_current_tag():
         file_path = ACTIVE_TAG_TARGET.get("file_path")
         if not file_path or not os.path.exists(file_path):
+            status_var.set("対象画像が選択されていません")
             messagebox.showwarning("タグ編集", "対象画像が選択されていません")
             return
         image_hash = ACTIVE_TAG_TARGET.get("image_hash") or calculate_file_hash(file_path)
         if not image_hash:
+            status_var.set("ハッシュ計算に失敗しました")
             messagebox.showerror("エラー", "画像ハッシュの計算に失敗しました")
             return
+
+        value = (tag_var.get() or "").strip()
+        normalized = "; ".join(p.strip() for p in value.split(";") if p.strip()) if value else ""
         if image_hash not in GazoControl.tag_dict:
             GazoControl.tag_dict[image_hash] = {"tag": "", "hint": os.path.basename(file_path), "rating": None}
-        GazoControl.tag_dict[image_hash]["tag"] = tag_var.get().strip()
+        GazoControl.tag_dict[image_hash]["tag"] = normalized
         GazoControl.tag_dict[image_hash]["hint"] = os.path.basename(file_path)
         save_tags(GazoControl.tag_dict)
         if hasattr(GazoControl, 'set_image_tag'):
@@ -431,15 +461,23 @@ def create_tag_editor_window(parent):
                         break
             except Exception:
                 pass
-        messagebox.showinfo("タグ保存", f"タグを保存しました: {tag_var.get().strip() or '未設定'}")
+
+        status_var.set(f"保存しました: {normalized or '未設定'}")
+        tag_var.set("")
+        entry.focus_set()
 
     def clear_current_tag():
         tag_var.set("")
+        status_var.set("入力をクリアしました")
+        entry.focus_set()
 
     btn_frame = tk.Frame(win)
     btn_frame.pack(fill="x", padx=10, pady=10)
-    tk.Button(btn_frame, text="保存", command=save_current_tag).pack(side=tk.LEFT, padx=(0, 6))
+    tk.Button(btn_frame, text="保存 (Enter)", command=save_current_tag).pack(side=tk.LEFT, padx=(0, 6))
     tk.Button(btn_frame, text="クリア", command=clear_current_tag).pack(side=tk.LEFT)
+
+    win.bind("<Return>", lambda event: save_current_tag())
+    win.bind("<Escape>", lambda event: clear_current_tag())
 
     return win, target_var, tag_var
 

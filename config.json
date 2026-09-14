@@ -1,9 +1,9 @@
 {
-    "last_folder": "/home/masayukitamate/画像",
+    "last_folder": "/home/masayukitamate/画像/e-roな画像たち",
     "geometries": {
-        "main": "511x401+442+44",
+        "main": "511x401+2323+152",
         "folder": "340x800+11+0",
-        "file": "600x688+910+33"
+        "file": "600x800+361+0"
     },
     "settings": {
         "random_pos": true,
@@ -11,10 +11,10 @@
         "show_folder": true,
         "show_file": true,
         "rating_window_geometry": null,
-        "show_rating_window": true,
+        "show_rating_window": false,
         "vector_window_geometry": null,
         "show_vector_window": false,
-        "show_info_window": true,
+        "show_info_window": false,
         "ss_mode": false,
         "ss_interval": 1,
         "ss_ai_mode": true,
@@ -60,7 +60,7 @@
         "image_max_width": 0,
         "image_max_height": 0,
         "vector_display": {
-            "enabled": true,
+            "enabled": false,
             "interpretation_mode": "labels",
             "show_color_features": false,
             "show_edge_features": true,
@@ -69,8 +69,8 @@
             "show_semantic_features": true,
             "max_dimensions_to_show": 10,
             "similarity_threshold": 0.05,
-            "show_internal_values": true,
-            "auto_vectorize": true
+            "show_internal_values": false,
+            "auto_vectorize": false
         },
         "smart_move_threshold": 0.9,
         "smart_move_show_thumbnails": true,
