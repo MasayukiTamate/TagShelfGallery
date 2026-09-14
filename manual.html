@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GazoTools User Manual</title>
+    <style>
+        body {
+            font-family: "Segoe UI", "Meiryo", sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: #e67e22;
+            margin-top: 30px;
+            border-left: 5px solid #e67e22;
+            padding-left: 10px;
+        }
+
+        h3 {
+            color: #2980b9;
+            margin-top: 20px;
+        }
+
+        ul {
+            list-style-type: disc;
+            margin-left: 20px;
+        }
+
+        li {
+            margin-bottom: 5px;
+        }
+
+        code {
+            background-color: #eee;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: Consolas, monospace;
+        }
+
+        .footer {
+            margin-top: 50px;
+            font-size: 0.8em;
+            color: #777;
+            text-align: center;
+            border-top: 1px solid #ddd;
+            padding-top: 20px;
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 5px solid #ffc107;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>GazoTools ユーザーマニュアル (v2.8)</h1>
+
+    <div class="highlight">
+        <strong>最新アップデート情報:</strong> マージ競合の解消と内部ロジックの最適化により、安定性が向上しました。
+    </div>
+
+    <h2>はじめに</h2>
+    <p>GazoToolsは、大量の画像ファイルを効率的に整理・閲覧するためのツールです。直感的な操作とAIによる支援機能により、推し活やイラスト収集を強力にサポートします。</p>
+
+    <h2>主な機能</h2>
+
+    <h3>1. フォルダ閲覧・画像表示</h3>
+    <ul>
+        <li><strong>フォルダツリー:</strong> 左側のウィンドウでフォルダ階層をナビゲートします。</li>
+        <li><strong>ファイルリスト:</strong> 中央のウィンドウでファイル一覧を表示します。</li>
+        <li><strong>画像プレビュー:</strong> 右側に選択した画像を表示します。マウスホイールでズーム、ドラッグで移動が可能です。</li>
+        <li><strong>タイル表示 (Ctrl+T):</strong> フォルダ内の画像をタイル状に並べて一覧表示します。</li>
+    </ul>
+
+    <h3>2. 評価・タグ付け</h3>
+    <ul>
+        <li><strong>評価 (Rating):</strong> 画像に1〜6の評価（★）を付けることができます。評価はキーボードの数字キー (1-6) でも操作可能です。</li>
+        <li><strong>タグ付け:</strong> 画像を右クリックしてタグを編集できます。</li>
+    </ul>
+
+    <h3>3. スマート移動機能 (Smart Move)</h3>
+    <p>AIが画像の類似度を判定し、似ている画像をまとめて移動できる機能です。</p>
+    <ul>
+        <li><strong>使い方:</strong> 画像リストで右クリック -> 「登録フォルダに移動」 -> 移動先を選択（または新規登録）。</li>
+        <li><strong>類似度スライダー:</strong> どれくらい似ている画像を対象にするか、スライダーで調整できます。</li>
+        <li><strong>サムネイル確認:</strong> 移動対象となる画像のサムネイル一覧が表示されるので、安心して実行できます。</li>
+    </ul>
+
+    <h3>4. ベクトル情報の可視化</h3>
+    <p>AIが画像をどのように認識しているかを表示します。</p>
+    <ul>
+        <li><strong>表示内容:</strong> 色、テクスチャ、形状などの特徴を、「赤色成分」「滑らか」といった言葉や数値で表示します。</li>
+        <li><strong>ベクトル解析ウィンドウ (New!):</strong>
+            メニューの「設定(Config)」->「ベクトルウィンドウ」から、解析情報を表示する専用の子画面を開くことができます。画像ウィンドウをクリックすると、選択した画像の解析内容に切り替わります。ウィンドウ下部の「解析開始」ボタンで手動解析も可能です。
+        </li>
+        <li><strong>表示オフ:</strong> 設定でベクトル解析機能が無効になっている場合に表示されます。</li>
+        <li><strong>手動解析:</strong> ベクトル未計算の画像を閲覧した際、自動的に解析が行われます（設定でOFF可能）。</li>
+        <li><strong>類似画像検索:</strong> 右クリックメニューから、現在表示中の画像に似ている画像をフォルダ内から検索できます。</li>
+    </ul>
+
+    <h3>5. その他の便利機能</h3>
+    <ul>
+        <li><strong>スプラッシュスクリーン:</strong> 起動時に気分を盛り上げるタイトル画面を表示します。</li>
+        <li><strong>ランダム移動:</strong> スペースキーを押すと、ランダムな画像にジャンプします。</li>
+        <li><strong>自動設定保存:</strong> ウィンドウ位置や最後に開いていたフォルダは自動的に記憶されます。</li>
+    </ul>
+
+    <h2>困ったときは</h2>
+    <ul>
+        <li><strong>エラー発生時:</strong> 詳細なエラーログ (<code>errarlog.md</code>) が生成されます。また、画面上の「Copy Error」ボタンで内容をコピーできます。</li>
+        <li><strong>動かない場合:</strong> <code>GazoToolsApp.py</code> を再起動してみてください。</li>
+    </ul>
+
+    <div class="footer">
+        Created by tamate masayuki / Refactored by Antigravity<br>
+        Generated on 2026/01/07
+    </div>
+
+</body>
+
+</html>

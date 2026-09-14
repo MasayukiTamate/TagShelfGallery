@@ -1,0 +1,215 @@
+2026-01-07 06:31:19 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:31:19 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:31:51 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:32:18 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:32:18 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:32:42 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:32:50 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:32:50 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:08 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:12 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:33 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:39 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:33:39 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:48 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:33:48 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:52 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:33:52 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:57 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:33:57 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:33:59 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1194, in Drawing
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:33:59 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:01 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:01 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:12 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    run_manual_vectorize()
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    interpreter = get_interpreter({"vector_display": getattr(app_state, 'vector_display', {})})
+                  ^^^^^^^^^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:12 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:28 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:28 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:30 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:30 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:33 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:33 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:35 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:35 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:37 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:37 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:41 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:41 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:46 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:46 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:34:48 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:34:48 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:35:48 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 06:36:06 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:1202] - ベクトル解釈エラー詳細:
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1186, in Drawing
+    if not vec and app_state.vector_display.get("auto_vectorize", True):
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "k:\GitHub\Gazo_tools\GazoToolsLogic.py", line 1162, in run_manual_vectorize
+    # 表示内容を更新
+              ^^^^^^^
+NameError: name 'get_interpreter' is not defined
+
+2026-01-07 06:36:06 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:913] - 情報ウィンドウ更新エラー: name 'get_interpreter' is not defined
+2026-01-07 07:00:51 - lib.GazoToolsAI - ERROR - [GazoToolsAI.py:191] - 画像ファイルが見つかりません: 135423862_p10.jpg
+Traceback (most recent call last):
+  File "k:\GitHub\Gazo_tools\lib\GazoToolsAI.py", line 158, in get_image_feature
+    image = Image.open(image_path).convert("RGB")
+            ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\magor\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\PIL\Image.py", line 3431, in open
+    fp = builtins.open(filename, "rb")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'K:\\GitHub\\Gazo_tools\\135423862_p10.jpg'
+2026-01-07 07:00:51 - GazoToolsLogic - ERROR - [GazoToolsLogic.py:990] - 手動解析エラー: Image file not found: 135423862_p10.jpg
+2026-01-07 07:08:06 - lib.GazoToolsState - WARNING - [GazoToolsState.py:352] - 不明なウィンドウ: vector_window_geometry
+2026-01-07 07:31:02 - lib.GazoToolsState - WARNING - [GazoToolsState.py:352] - 不明なウィンドウ: vector_window_geometry
