@@ -1,10 +1,10 @@
 {
     "last_folder": "/home/masayukitamate/画像/e-roな画像たち",
     "geometries": {
-        "main": "511x401+638+873",
+        "main": "511x401+59+38",
         "folder": "1x1+11+0",
         "file": "600x800+361+0",
-        "thumbnail": "2409x1215+1184+43",
+        "thumbnail": "3427x1215+0+169",
         "vector_window_geometry": "1x1+0+0"
     },
     "settings": {
@@ -12,13 +12,13 @@
         "random_size": true,
         "topmost": 0,
         "show_folder": false,
-        "show_file": true,
+        "show_file": false,
         "show_rating_window": false,
         "show_vector_window": false,
         "show_info_window": false,
         "show_thumbnail_window": true,
         "thumbnail_rows": 3,
-        "thumbnail_columns": 5,
+        "thumbnail_columns": 7,
         "thumbnail_width": 500,
         "thumbnail_height": 500,
         "rating_ui": {

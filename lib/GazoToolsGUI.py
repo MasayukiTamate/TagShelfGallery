@@ -4,6 +4,7 @@
 '''
 import os
 import tkinter as tk
+from tkinter import ttk
 from tkinter import messagebox
 from PIL import Image, ImageTk, ImageOps
 import random
@@ -47,11 +48,12 @@ def calculate_thumbnail_tile_size(canvas_width, canvas_height, rows, columns, ba
 class ThumbnailPanelWindow(tk.Toplevel):
     """画像だけを格子状に並べる、操作可能なサムネイルパネル。"""
 
-    def __init__(self, parent, files=None, select_callback=None):
+    def __init__(self, parent, files=None, select_callback=None, close_callback=None, window_number=1):
         super().__init__(parent)
-        self.title("画像サムネイル")
+        self.title(f"画像サムネイル {window_number}")
         self.attributes("-topmost", bool(app_state.topmost))
         self.select_callback = select_callback
+        self.close_callback = close_callback
         self.files = []
         self._photo_refs = {}
         self._tile_labels = {}
@@ -65,14 +67,28 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self.width_var = tk.IntVar(value=app_state.thumbnail_width)
         self.height_var = tk.IntVar(value=app_state.thumbnail_height)
 
-        control = tk.Frame(self)
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=tk.BOTH, expand=True)
+        image_tab = tk.Frame(notebook, bg="#202020")
+        settings_tab = tk.Frame(notebook)
+        notebook.add(image_tab, text="画像")
+        notebook.add(settings_tab, text="設定")
+        self.notebook = notebook
+        self.image_tab = image_tab
+        self.show_images_var = tk.BooleanVar(value=True)
+
+        control = tk.Frame(settings_tab)
         control.pack(fill=tk.X, padx=5, pady=5)
+        tk.Checkbutton(
+            control, text="画像を表示", variable=self.show_images_var,
+            command=self._toggle_image_panel,
+        ).grid(row=0, column=8, padx=8)
         self._add_spinbox(control, "縦", self.rows_var, 1, 20, 0)
         self._add_spinbox(control, "横", self.columns_var, 1, 20, 2)
         self._add_spinbox(control, "幅", self.width_var, 32, 2000, 4)
         self._add_spinbox(control, "高さ", self.height_var, 32, 2000, 6)
 
-        self.canvas = tk.Canvas(self, highlightthickness=0, bg="#202020")
+        self.canvas = tk.Canvas(image_tab, highlightthickness=0, bg="#202020")
         self.scrollbar = tk.Scrollbar(self, orient=tk.VERTICAL, command=self._scroll)
         self.hscrollbar = tk.Scrollbar(self, orient=tk.HORIZONTAL, command=self._scroll)
         self.canvas.configure(
@@ -87,7 +103,8 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self.bind("<Configure>", self._on_window_resize)
         self.bind("<MouseWheel>", self._on_mousewheel)
         self.geometry("900x700")
-        self.protocol("WM_DELETE_WINDOW", self.withdraw)
+        self.bind("<Control-w>", lambda event: self.withdraw())
+        self.protocol("WM_DELETE_WINDOW", self._close_window)
         self.set_files(files or [])
 
     def _add_spinbox(self, parent, label, variable, minimum, maximum, column):
@@ -109,6 +126,22 @@ class ThumbnailPanelWindow(tk.Toplevel):
             self.render()
         except (tk.TclError, ValueError):
             return
+
+    def _toggle_image_panel(self):
+        if self.show_images_var.get():
+            self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            self.hscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        else:
+            self.canvas.pack_forget()
+            self.scrollbar.pack_forget()
+            self.hscrollbar.pack_forget()
+
+    def _close_window(self):
+        if self.close_callback:
+            self.close_callback(self)
+        else:
+            self.withdraw()
 
     def set_files(self, files):
         self.files = list(files)
@@ -198,6 +231,7 @@ class ThumbnailPanelWindow(tk.Toplevel):
             label.bind("<Button-1>", lambda event, path=file_path: self._select(path))
             label.bind("<Double-Button-1>", lambda event, path=file_path: self._select(path, open_image=True))
             label.bind("<MouseWheel>", self._on_mousewheel)
+            label.bind("<Button-3>", lambda event, path=file_path: self._show_context_menu(event, path))
             self._tile_labels[index] = (label, file_path)
             self._tile_windows[index] = (window_id, tile)
             try:
@@ -212,6 +246,19 @@ class ThumbnailPanelWindow(tk.Toplevel):
     def _select(self, file_path, open_image=False):
         if self.select_callback:
             self.select_callback(file_path, open_image)
+
+    def _show_context_menu(self, event, file_path):
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="画像を開く", command=lambda: self._select(file_path, open_image=True))
+        menu.add_command(label="パスをコピー", command=lambda: self._copy_path(file_path))
+        menu.add_separator()
+        menu.add_command(label="このサムネイル窓を隠す", command=self.withdraw)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _copy_path(self, file_path):
+        self.clipboard_clear()
+        self.clipboard_append(file_path)
+        self.update()
 
     def show(self):
         self.deiconify()

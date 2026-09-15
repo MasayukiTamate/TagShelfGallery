@@ -294,8 +294,17 @@ def refresh_ui(new_path):
     
     refresh_file_listbox_with_tag_filter(files)
 
-    if 'thumbnail_window' in globals() and thumbnail_window.winfo_exists():
-        thumbnail_window.set_files([os.path.join(DEFOLDER, name) for name in files])
+    if 'thumbnail_windows' in globals():
+        thumbnail_files = [os.path.join(DEFOLDER, name) for name in files]
+        for window in list(thumbnail_windows):
+            try:
+                if window.winfo_exists():
+                    window.set_files(thumbnail_files)
+                else:
+                    thumbnail_windows.remove(window)
+            except tk.TclError:
+                if window in thumbnail_windows:
+                    thumbnail_windows.remove(window)
 
     if 'folder_win' in globals() and 'file_win' in globals():
         adjust_window_layouts(folders, files)
@@ -895,10 +904,12 @@ def on_closing_main():
         app_state.show_rating_window = show_rating_win.get()
         app_state.show_info_window = show_info_win.get()
         app_state.show_thumbnail_window = show_thumbnail_win.get()
-        app_state.thumbnail_rows = thumbnail_window.rows_var.get()
-        app_state.thumbnail_columns = thumbnail_window.columns_var.get()
-        app_state.thumbnail_width = thumbnail_window.width_var.get()
-        app_state.thumbnail_height = thumbnail_window.height_var.get()
+        if thumbnail_windows:
+            primary_thumbnail = thumbnail_windows[0]
+            app_state.thumbnail_rows = primary_thumbnail.rows_var.get()
+            app_state.thumbnail_columns = primary_thumbnail.columns_var.get()
+            app_state.thumbnail_width = primary_thumbnail.width_var.get()
+            app_state.thumbnail_height = primary_thumbnail.height_var.get()
         app_state.vector_display["enabled"] = show_vector_win.get()
         app_state.set_ss_mode(ss_mode.get())
         app_state.set_ss_interval(ss_interval.get())
@@ -929,8 +940,8 @@ def on_closing_main():
 
 def safe_select_folder():
     wins = [koRoot, folder_win, file_win]
-    if 'thumbnail_window' in globals():
-        wins.append(thumbnail_window)
+    if 'thumbnail_windows' in globals():
+        wins.extend(thumbnail_windows)
     prev_states = [w.attributes("-topmost") for w in wins]
     for w in wins: w.attributes("-topmost", False)
     path = filedialog.askdirectory(title="画像フォルダを選択してください")
@@ -940,8 +951,8 @@ def safe_select_folder():
 def set_all_topmost(enabled):
     """メイン・サブ・画像ウィンドウ全体の最前面設定をまとめて切り替える。"""
     wins = [koRoot, folder_win, file_win]
-    if 'thumbnail_window' in globals():
-        wins.append(thumbnail_window)
+    if 'thumbnail_windows' in globals():
+        wins.extend(thumbnail_windows)
     wins.extend(list(GazoControl.open_windows.values()))
     wins = list(dict.fromkeys([w for w in wins if w and w.winfo_exists()]))
     for w in wins:
@@ -1142,6 +1153,9 @@ show_topmost_win = tk.BooleanVar(value=app_state.topmost)
 show_thumbnail_win = tk.BooleanVar(value=app_state.show_thumbnail_window)
 
 def update_visibility():
+    global thumbnail_window
+    if not thumbnail_windows:
+        thumbnail_window = create_thumbnail_window()
     if show_folder_win.get(): 
         folder_win.deiconify()
         app_state.set_show_folder_window(True)
@@ -1207,6 +1221,7 @@ view_menu.add_checkbutton(label="評価ウィンドウを表示", variable=show_
 view_menu.add_checkbutton(label="情報ウィンドウを表示", variable=show_info_win, command=update_visibility)
 view_menu.add_checkbutton(label="ベクトル情報を表示", variable=show_vector_win, command=update_visibility)
 view_menu.add_checkbutton(label="サムネイルパネルを表示", variable=show_thumbnail_win, command=update_visibility)
+view_menu.add_command(label="新しいサムネイル窓を作成", command=lambda: create_thumbnail_window())
 view_menu.add_separator()
 view_menu.add_checkbutton(label="全体を最前面に固定", variable=show_topmost_win, command=lambda: set_all_topmost(show_topmost_win.get()))
 view_menu.add_command(label="全ての画像を閉じる(R)", command=lambda: GazoControl.CloseAll())
@@ -1681,11 +1696,29 @@ def on_thumbnail_select(file_path, open_image=False):
     if file_path and os.path.exists(file_path):
         GazoControl.Drawing(file_path)
 
-thumbnail_window = ThumbnailPanelWindow(
-    koRoot,
-    [os.path.join(DEFOLDER, name) for name in GetGazoFiles(all_items, DEFOLDER)],
-    select_callback=on_thumbnail_select,
-)
+thumbnail_windows = []
+
+def remove_thumbnail_window(window):
+    if window in thumbnail_windows:
+        thumbnail_windows.remove(window)
+    try:
+        window.destroy()
+    except tk.TclError:
+        pass
+
+def create_thumbnail_window():
+    window = ThumbnailPanelWindow(
+        koRoot,
+        [os.path.join(DEFOLDER, name) for name in GetGazoFiles(os.listdir(DEFOLDER), DEFOLDER)],
+        select_callback=on_thumbnail_select,
+        close_callback=remove_thumbnail_window,
+        window_number=len(thumbnail_windows) + 1,
+    )
+    thumbnail_windows.append(window)
+    window.show()
+    return window
+
+thumbnail_window = create_thumbnail_window()
 # ベクトル表示用ウィンドウ
 vector_window = VectorWindow(koRoot)
 tag_window = create_tag_window(koRoot)
@@ -1922,14 +1955,17 @@ def on_closing():
         # ウィンドウ位置を更新
         if GazoControl.folder_win: app_state.set_window_geometry("folder", GazoControl.folder_win.geometry())
         if GazoControl.file_win: app_state.set_window_geometry("file", GazoControl.file_win.geometry())
-        if thumbnail_window: app_state.set_window_geometry("thumbnail", thumbnail_window.geometry())
+        if thumbnail_windows:
+            app_state.set_window_geometry("thumbnail", thumbnail_windows[0].geometry())
         # メインウィンドウは koRoot
         app_state.set_window_geometry("main", koRoot.geometry())
         app_state.show_thumbnail_window = show_thumbnail_win.get()
-        app_state.thumbnail_rows = thumbnail_window.rows_var.get()
-        app_state.thumbnail_columns = thumbnail_window.columns_var.get()
-        app_state.thumbnail_width = thumbnail_window.width_var.get()
-        app_state.thumbnail_height = thumbnail_window.height_var.get()
+        if thumbnail_windows:
+            primary_thumbnail = thumbnail_windows[0]
+            app_state.thumbnail_rows = primary_thumbnail.rows_var.get()
+            app_state.thumbnail_columns = primary_thumbnail.columns_var.get()
+            app_state.thumbnail_width = primary_thumbnail.width_var.get()
+            app_state.thumbnail_height = primary_thumbnail.height_var.get()
 
         # ベクトルウィンドウの位置と表示状態保存
         if vector_window:
