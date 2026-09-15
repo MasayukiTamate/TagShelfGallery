@@ -1,24 +1,47 @@
 {
     "last_folder": "/home/masayukitamate/画像/e-roな画像たち",
     "geometries": {
-        "main": "511x401+2323+152",
-        "folder": "340x800+11+0",
-        "file": "600x800+361+0"
+        "main": "511x401+638+873",
+        "folder": "1x1+11+0",
+        "file": "600x800+361+0",
+        "thumbnail": "2409x1215+1184+43",
+        "vector_window_geometry": "1x1+0+0"
     },
     "settings": {
         "random_pos": true,
+        "random_size": true,
         "topmost": 0,
-        "show_folder": true,
+        "show_folder": false,
         "show_file": true,
-        "rating_window_geometry": null,
         "show_rating_window": false,
-        "vector_window_geometry": null,
         "show_vector_window": false,
         "show_info_window": false,
+        "show_thumbnail_window": true,
+        "thumbnail_rows": 3,
+        "thumbnail_columns": 5,
+        "thumbnail_width": 500,
+        "thumbnail_height": 500,
+        "rating_ui": {
+            "text_font_size": 24,
+            "star_font_size": 32,
+            "layout_order": [
+                "stars",
+                "text",
+                "text"
+            ],
+            "window_width": 280,
+            "window_height": 120,
+            "position_x": 5,
+            "position_y": 85,
+            "padding_x": 10,
+            "padding_y": 8,
+            "margin": 15
+        },
         "ss_mode": false,
         "ss_interval": 1,
         "ss_ai_mode": true,
         "ss_ai_threshold": 0.65,
+        "ss_include_subfolders": true,
         "move_dest_list": [
             "",
             "",
@@ -37,24 +60,6 @@
         "move_dest_count": 8,
         "cpu_low_color": "#e0ffe0",
         "cpu_high_color": "#ff8080",
-        "random_size": true,
-        "rating_ui": {
-            "text_font_size": 24,
-            "star_font_size": 32,
-            "layout_order": [
-                "stars",
-                "text",
-                "text"
-            ],
-            "window_width": 280,
-            "window_height": 120,
-            "position_x": 5,
-            "position_y": 85,
-            "padding_x": 10,
-            "padding_y": 8,
-            "margin": 15
-        },
-        "ss_include_subfolders": true,
         "image_min_width": 500,
         "image_min_height": 500,
         "image_max_width": 0,

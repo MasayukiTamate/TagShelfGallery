@@ -75,6 +75,30 @@ class TestAppStateStatePersistence:
         assert "last_folder" in state_dict
         assert "geometries" in state_dict
         assert "settings" in state_dict
+
+    def test_thumbnail_panel_settings_persist(self):
+        """サムネイルパネルの表示設定と格子設定を保存・復元できること"""
+        app_state = get_app_state()
+        app_state.show_thumbnail_window = False
+        app_state.thumbnail_rows = 5
+        app_state.thumbnail_columns = 6
+        app_state.thumbnail_width = 220
+        app_state.thumbnail_height = 180
+
+        saved = app_state.to_dict()
+        restored = get_app_state()
+        restored.show_thumbnail_window = True
+        restored.thumbnail_rows = 1
+        restored.thumbnail_columns = 1
+        restored.thumbnail_width = 32
+        restored.thumbnail_height = 32
+        restored.from_dict(saved)
+
+        assert restored.show_thumbnail_window is False
+        assert restored.thumbnail_rows == 5
+        assert restored.thumbnail_columns == 6
+        assert restored.thumbnail_width == 220
+        assert restored.thumbnail_height == 180
     
     def test_state_from_dict(self):
         """from_dict() メソッドで状態を復元できること"""

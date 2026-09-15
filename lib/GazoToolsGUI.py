@@ -5,7 +5,7 @@
 import os
 import tkinter as tk
 from tkinter import messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import random
 import threading
 import time
@@ -35,6 +35,190 @@ except ImportError:
 
 logger = get_logger(__name__)
 app_state = get_app_state()
+
+
+def calculate_thumbnail_tile_size(canvas_width, canvas_height, rows, columns, base_width, base_height):
+    """固定サムネイルサイズを返す。窓サイズでは画像サイズを変えない。"""
+    base_width = max(32, int(base_width))
+    base_height = max(32, int(base_height))
+    return base_width, base_height
+
+
+class ThumbnailPanelWindow(tk.Toplevel):
+    """画像だけを格子状に並べる、操作可能なサムネイルパネル。"""
+
+    def __init__(self, parent, files=None, select_callback=None):
+        super().__init__(parent)
+        self.title("画像サムネイル")
+        self.attributes("-topmost", bool(app_state.topmost))
+        self.select_callback = select_callback
+        self.files = []
+        self._photo_refs = {}
+        self._tile_labels = {}
+        self._tile_windows = {}
+        self._visible_signature = None
+        self._tile_size = (app_state.thumbnail_width, app_state.thumbnail_height)
+        self._resize_after_id = None
+        self._load_after_id = None
+        self.rows_var = tk.IntVar(value=app_state.thumbnail_rows)
+        self.columns_var = tk.IntVar(value=app_state.thumbnail_columns)
+        self.width_var = tk.IntVar(value=app_state.thumbnail_width)
+        self.height_var = tk.IntVar(value=app_state.thumbnail_height)
+
+        control = tk.Frame(self)
+        control.pack(fill=tk.X, padx=5, pady=5)
+        self._add_spinbox(control, "縦", self.rows_var, 1, 20, 0)
+        self._add_spinbox(control, "横", self.columns_var, 1, 20, 2)
+        self._add_spinbox(control, "幅", self.width_var, 32, 2000, 4)
+        self._add_spinbox(control, "高さ", self.height_var, 32, 2000, 6)
+
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg="#202020")
+        self.scrollbar = tk.Scrollbar(self, orient=tk.VERTICAL, command=self._scroll)
+        self.hscrollbar = tk.Scrollbar(self, orient=tk.HORIZONTAL, command=self._scroll)
+        self.canvas.configure(
+            yscrollcommand=self.scrollbar.set,
+            xscrollcommand=self.hscrollbar.set,
+        )
+        self.hscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Configure>", self._on_window_resize)
+        self.bind("<MouseWheel>", self._on_mousewheel)
+        self.geometry("900x700")
+        self.protocol("WM_DELETE_WINDOW", self.withdraw)
+        self.set_files(files or [])
+
+    def _add_spinbox(self, parent, label, variable, minimum, maximum, column):
+        tk.Label(parent, text=label).grid(row=0, column=column, padx=(4, 1))
+        spinbox = tk.Spinbox(
+            parent, from_=minimum, to=maximum, width=4,
+            textvariable=variable, command=self._settings_changed,
+        )
+        spinbox.grid(row=0, column=column + 1, padx=(0, 4))
+        spinbox.bind("<Return>", lambda event: self._settings_changed())
+        spinbox.bind("<FocusOut>", lambda event: self._settings_changed())
+
+    def _settings_changed(self):
+        try:
+            app_state.thumbnail_rows = max(1, int(self.rows_var.get()))
+            app_state.thumbnail_columns = max(1, int(self.columns_var.get()))
+            app_state.thumbnail_width = max(32, int(self.width_var.get()))
+            app_state.thumbnail_height = max(32, int(self.height_var.get()))
+            self.render()
+        except (tk.TclError, ValueError):
+            return
+
+    def set_files(self, files):
+        self.files = list(files)
+        self.render()
+
+    def _on_canvas_resize(self, event):
+        self._schedule_visible_render()
+
+    def _on_window_resize(self, event):
+        if self._resize_after_id is not None:
+            self.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.after(80, self._schedule_visible_render)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        self._schedule_visible_render()
+
+    def _scroll(self, *args):
+        self.canvas.yview(*args)
+        self._schedule_visible_render()
+
+    def _schedule_visible_render(self):
+        if self._load_after_id is not None:
+            self.after_cancel(self._load_after_id)
+        self._load_after_id = self.after(30, self._render_visible_rows)
+
+    def render(self):
+        if not self.winfo_exists():
+            return
+        self._clear_visible_tiles()
+        self._photo_refs = {}
+        self._tile_labels = {}
+        self._visible_signature = None
+        try:
+            rows = max(1, int(self.rows_var.get()))
+            columns = max(1, int(self.columns_var.get()))
+            base_width = max(32, int(self.width_var.get()))
+            base_height = max(32, int(self.height_var.get()))
+        except (tk.TclError, ValueError):
+            return
+
+        tile_width, tile_height = calculate_thumbnail_tile_size(
+            self.canvas.winfo_width(), self.canvas.winfo_height(),
+            rows, columns, base_width, base_height,
+        )
+        self._tile_size = (tile_width, tile_height)
+
+        total_rows = (len(self.files) + columns - 1) // columns
+        self.canvas.configure(scrollregion=(0, 0, columns * (tile_width + 4), max(1, total_rows * (tile_height + 4))))
+        self._schedule_visible_render()
+
+    def _clear_visible_tiles(self):
+        for window_id, tile in self._tile_windows.values():
+            self.canvas.delete(window_id)
+            tile.destroy()
+        self._tile_windows = {}
+
+    def _render_visible_rows(self):
+        self._load_after_id = None
+        tile_height = self._tile_size[1] + 4
+        first_row = max(0, int(self.canvas.canvasy(0) // tile_height) - 1)
+        visible_rows = max(1, int(self.canvas.winfo_height() // tile_height) + 2)
+        columns = max(1, int(self.columns_var.get()))
+        first_index = first_row * columns
+        last_index = min(len(self.files), (first_row + visible_rows) * columns)
+        signature = (first_index, last_index, self._tile_size, columns)
+        if signature == self._visible_signature:
+            return
+
+        self._clear_visible_tiles()
+        self._photo_refs = {}
+        self._tile_labels = {}
+        self._visible_signature = signature
+        for index in range(first_index, last_index):
+            file_path = self.files[index]
+            row, column = divmod(index, columns)
+            tile = tk.Frame(self.canvas, width=self._tile_size[0], height=self._tile_size[1], bg="#303030")
+            window_id = self.canvas.create_window(
+                column * (self._tile_size[0] + 4),
+                row * (self._tile_size[1] + 4),
+                window=tile,
+                anchor="nw",
+            )
+            tile.grid_propagate(False)
+            label = tk.Label(tile, bg="#303030", bd=0, highlightthickness=0)
+            label.pack(fill=tk.BOTH, expand=True)
+            label.bind("<Button-1>", lambda event, path=file_path: self._select(path))
+            label.bind("<Double-Button-1>", lambda event, path=file_path: self._select(path, open_image=True))
+            label.bind("<MouseWheel>", self._on_mousewheel)
+            self._tile_labels[index] = (label, file_path)
+            self._tile_windows[index] = (window_id, tile)
+            try:
+                with Image.open(file_path) as image:
+                    fitted = ImageOps.contain(image, self._tile_size, method=Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(master=label, image=fitted)
+                self._photo_refs[index] = photo
+                label.configure(image=photo)
+            except Exception:
+                continue
+
+    def _select(self, file_path, open_image=False):
+        if self.select_callback:
+            self.select_callback(file_path, open_image)
+
+    def show(self):
+        self.deiconify()
+        self.lift()
+
+    def set_topmost(self, enabled):
+        self.attributes("-topmost", bool(enabled))
 
 class ScrollableFrame(tk.Frame):
     """スクロール可能なフレームウィジェット"""

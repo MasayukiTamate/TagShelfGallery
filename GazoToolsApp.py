@@ -21,7 +21,11 @@ setup_logging(debug_mode=False)  # False=本番モード, True=デバッグモ�
 logger = get_logger(__name__)
 
 # ロジックモジュールのインポート
-from GazoToolsLogic import load_config, save_config, HakoData, GazoPicture, calculate_file_hash, VectorBatchProcessor, save_ratings, save_tags, calculate_window_layout
+from GazoToolsLogic import (
+    load_config, save_config, HakoData, GazoPicture, calculate_file_hash,
+    VectorBatchProcessor, save_ratings, save_tags, calculate_window_layout,
+    build_thumbnail_photo,
+)
 from lib.GazoToolsBasicLib import tkConvertWinSize, blend_color
 from lib.GazoToolsLib import GetKoFolder, GetGazoFiles
 from lib.GazoToolsState import get_app_state
@@ -42,7 +46,7 @@ from lib.config_defaults import (
     MIN_AI_THRESHOLD, MAX_AI_THRESHOLD, DEFAULT_AI_THRESHOLD, COLOR_REGISTER_BG,
     RATING_SIZE_PRESETS, RATING_POSITION_PRESETS
 )
-from lib.GazoToolsGUI import SplashWindow, SimilarityMoveDialog, VectorWindow
+from lib.GazoToolsGUI import SplashWindow, SimilarityMoveDialog, VectorWindow, ThumbnailPanelWindow
 
 # --- アプリケーション状態の初期化 ---
 app_state = get_app_state()
@@ -289,6 +293,9 @@ def refresh_ui(new_path):
             folder_listbox.insert(tk.END, f"(-) {f}")
     
     refresh_file_listbox_with_tag_filter(files)
+
+    if 'thumbnail_window' in globals() and thumbnail_window.winfo_exists():
+        thumbnail_window.set_files([os.path.join(DEFOLDER, name) for name in files])
 
     if 'folder_win' in globals() and 'file_win' in globals():
         adjust_window_layouts(folders, files)
@@ -652,6 +659,49 @@ def create_file_list_window(parent, files, draw_func):
     lb.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
     scrollbar.config(command=lb.yview)
 
+    preview_win = tk.Toplevel(parent)
+    preview_win.title("画像プレビュー")
+    preview_win.attributes("-topmost", True)
+    preview_win.transient(win)
+    preview_win.geometry("220x220")
+    preview_label = tk.Label(preview_win, text="選択中のファイル\nプレビュー", compound="center", justify="center", width=20, height=10)
+    preview_label.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+    preview_photo = None
+
+    def update_preview_for_selected(event=None):
+        nonlocal preview_photo
+        try:
+            idx = lb.curselection()
+            if not idx:
+                preview_label.configure(text="選択中のファイル\nプレビュー", image="")
+                preview_photo = None
+                return
+            selected = lb.get(idx[0])
+            if not selected:
+                preview_label.configure(text="プレビューなし", image="")
+                preview_photo = None
+                return
+            full_path = os.path.join(DEFOLDER, selected)
+            if not os.path.exists(full_path):
+                preview_label.configure(text="ファイルなし", image="")
+                preview_photo = None
+                return
+            new_photo = build_thumbnail_photo(full_path, size=(180, 180), master=preview_label)
+            if new_photo is None:
+                preview_label.configure(text="プレビュー不可\n画像形式ではありません", image="")
+                preview_photo = None
+                return
+            preview_label.configure(image=new_photo, text="")
+            preview_label.image = new_photo
+            preview_photo = new_photo
+        except Exception as exc:
+            preview_label.configure(text="プレビュー失敗", image="")
+            preview_photo = None
+            logger.warning(f"ファイル一覧プレビュー更新失敗: {exc}")
+
+    lb.bind("<<ListboxSelect>>", update_preview_for_selected)
+    update_preview_for_selected()
+
     # ダブルクリックで表示
     def on_double_click(event):
         try:
@@ -833,6 +883,8 @@ def on_closing_main():
         app_state.set_window_geometry("main", koRoot.winfo_geometry())
         app_state.set_window_geometry("folder", folder_win.winfo_geometry())
         app_state.set_window_geometry("file", file_win.winfo_geometry())
+        if 'thumbnail_window' in globals() and thumbnail_window.winfo_exists():
+            app_state.set_window_geometry("thumbnail", thumbnail_window.geometry())
         
         # UI 設定を保存
         app_state.set_random_pos(GazoControl.random_pos.get())
@@ -842,6 +894,11 @@ def on_closing_main():
         app_state.set_show_file_window(show_file_win.get())
         app_state.show_rating_window = show_rating_win.get()
         app_state.show_info_window = show_info_win.get()
+        app_state.show_thumbnail_window = show_thumbnail_win.get()
+        app_state.thumbnail_rows = thumbnail_window.rows_var.get()
+        app_state.thumbnail_columns = thumbnail_window.columns_var.get()
+        app_state.thumbnail_width = thumbnail_window.width_var.get()
+        app_state.thumbnail_height = thumbnail_window.height_var.get()
         app_state.vector_display["enabled"] = show_vector_win.get()
         app_state.set_ss_mode(ss_mode.get())
         app_state.set_ss_interval(ss_interval.get())
@@ -872,6 +929,8 @@ def on_closing_main():
 
 def safe_select_folder():
     wins = [koRoot, folder_win, file_win]
+    if 'thumbnail_window' in globals():
+        wins.append(thumbnail_window)
     prev_states = [w.attributes("-topmost") for w in wins]
     for w in wins: w.attributes("-topmost", False)
     path = filedialog.askdirectory(title="画像フォルダを選択してください")
@@ -881,6 +940,8 @@ def safe_select_folder():
 def set_all_topmost(enabled):
     """メイン・サブ・画像ウィンドウ全体の最前面設定をまとめて切り替える。"""
     wins = [koRoot, folder_win, file_win]
+    if 'thumbnail_window' in globals():
+        wins.append(thumbnail_window)
     wins.extend(list(GazoControl.open_windows.values()))
     wins = list(dict.fromkeys([w for w in wins if w and w.winfo_exists()]))
     for w in wins:
@@ -893,12 +954,15 @@ def set_all_topmost(enabled):
 
 
 def disable_all_topmost():
+    show_topmost_win.set(False)
     set_all_topmost(False)
     GazoControl.disable_all_topmost()
 
 
 def enable_all_topmost():
+    show_topmost_win.set(True)
     set_all_topmost(True)
+
 
 # 実体生成
 data_manager = HakoData(DEFOLDER)
@@ -1074,6 +1138,8 @@ show_file_win = tk.BooleanVar(value=app_state.show_file_window)
 show_rating_win = tk.BooleanVar(value=app_state.show_rating_window)
 show_info_win = tk.BooleanVar(value=app_state.show_info_window)
 show_vector_win = tk.BooleanVar(value=app_state.vector_display.get("enabled", True))
+show_topmost_win = tk.BooleanVar(value=app_state.topmost)
+show_thumbnail_win = tk.BooleanVar(value=app_state.show_thumbnail_window)
 
 def update_visibility():
     if show_folder_win.get(): 
@@ -1090,15 +1156,61 @@ def update_visibility():
         file_win.withdraw()
         app_state.set_show_file_window(False)
 
+    if show_thumbnail_win.get():
+        thumbnail_window.show()
+        app_state.show_thumbnail_window = True
+    else:
+        thumbnail_window.withdraw()
+        app_state.show_thumbnail_window = False
+
+    if show_rating_win.get():
+        app_state.show_rating_window = True
+        if hasattr(GazoControl, '_current_image_hash') and GazoControl._current_image_hash:
+            GazoControl.update_rating_window(GazoControl._current_image_hash)
+        elif hasattr(GazoControl, '_rating_window') and GazoControl._rating_window:
+            GazoControl._rating_window.deiconify()
+    else:
+        app_state.show_rating_window = False
+        if hasattr(GazoControl, '_rating_window') and GazoControl._rating_window:
+            GazoControl._rating_window.withdraw()
+
+    if show_info_win.get():
+        app_state.show_info_window = True
+        if hasattr(GazoControl, '_current_image_hash') and GazoControl._current_image_hash:
+            current_path = getattr(GazoControl, '_current_image_path', '')
+            if current_path and hasattr(GazoControl, 'update_info_window'):
+                GazoControl.update_info_window(current_path, GazoControl._current_image_hash)
+    else:
+        app_state.show_info_window = False
+        if hasattr(GazoControl, '_info_window') and GazoControl._info_window:
+            GazoControl._info_window.withdraw()
+
+    if hasattr(GazoControl, 'vector_win') and GazoControl.vector_win is not None:
+        if show_vector_win.get():
+            app_state.vector_display["enabled"] = True
+            try:
+                GazoControl.vector_win.deiconify()
+            except Exception:
+                pass
+        else:
+            app_state.vector_display["enabled"] = False
+            try:
+                GazoControl.vector_win.withdraw()
+            except Exception:
+                pass
+
 view_menu = tk.Menu(menubar, tearoff=0)
 menubar.add_cascade(label="表示(V)", menu=view_menu)
 view_menu.add_checkbutton(label="フォルダ一覧を表示", variable=show_folder_win, command=update_visibility)
 view_menu.add_checkbutton(label="ファイル一覧を表示", variable=show_file_win, command=update_visibility)
+view_menu.add_checkbutton(label="評価ウィンドウを表示", variable=show_rating_win, command=update_visibility)
+view_menu.add_checkbutton(label="情報ウィンドウを表示", variable=show_info_win, command=update_visibility)
+view_menu.add_checkbutton(label="ベクトル情報を表示", variable=show_vector_win, command=update_visibility)
+view_menu.add_checkbutton(label="サムネイルパネルを表示", variable=show_thumbnail_win, command=update_visibility)
+view_menu.add_separator()
+view_menu.add_checkbutton(label="全体を最前面に固定", variable=show_topmost_win, command=lambda: set_all_topmost(show_topmost_win.get()))
 view_menu.add_command(label="全ての画像を閉じる(R)", command=lambda: GazoControl.CloseAll())
 view_menu.add_command(label="全ての画像を整列(T)", command=lambda: GazoControl.TileWindows())
-view_menu.add_separator()
-view_menu.add_command(label="全ての最前面表示をON", command=enable_all_topmost)
-view_menu.add_command(label="全ての最前面表示をOFF", command=disable_all_topmost)
 
 config_menu = tk.Menu(menubar, tearoff=0)
 menubar.add_cascade(label="設定(S)", menu=config_menu)
@@ -1563,6 +1675,17 @@ config_menu.add_command(label="常に最前面(T) ON/OFF", command=lambda: koRoo
 all_items = os.listdir(DEFOLDER)
 folder_win, folder_listbox = create_folder_list_window(koRoot, GetKoFolder(all_items, DEFOLDER))
 file_win, file_listbox = create_file_list_window(koRoot, GetGazoFiles(all_items, DEFOLDER), GazoControl.Drawing)
+
+def on_thumbnail_select(file_path, open_image=False):
+    """サムネイルクリックで対象画像を表示する。"""
+    if file_path and os.path.exists(file_path):
+        GazoControl.Drawing(file_path)
+
+thumbnail_window = ThumbnailPanelWindow(
+    koRoot,
+    [os.path.join(DEFOLDER, name) for name in GetGazoFiles(all_items, DEFOLDER)],
+    select_callback=on_thumbnail_select,
+)
 # ベクトル表示用ウィンドウ
 vector_window = VectorWindow(koRoot)
 tag_window = create_tag_window(koRoot)
@@ -1585,6 +1708,8 @@ vector_sub.add_command(label="表示/非表示", command=toggle_vector_window)
 if "main" in SAVED_GEOS: koRoot.geometry(SAVED_GEOS["main"])
 if "folder" in SAVED_GEOS: folder_win.geometry(SAVED_GEOS["folder"])
 if "file" in SAVED_GEOS: file_win.geometry(SAVED_GEOS["file"])
+if SAVED_GEOS.get("thumbnail"):
+    thumbnail_window.geometry(SAVED_GEOS["thumbnail"])
 
 # ベクトルウィンドウの復元
 if SAVED_GEOS.get("vector_window_geometry"):
@@ -1596,6 +1721,11 @@ else:
     vector_window.withdraw()
 
 update_visibility()
+
+if app_state.show_thumbnail_window:
+    thumbnail_window.show()
+else:
+    thumbnail_window.withdraw()
 
 folder_win.protocol("WM_DELETE_WINDOW", lambda: (show_folder_win.set(False), folder_win.withdraw()))
 file_win.protocol("WM_DELETE_WINDOW", lambda: (show_file_win.set(False), file_win.withdraw()))
@@ -1792,8 +1922,14 @@ def on_closing():
         # ウィンドウ位置を更新
         if GazoControl.folder_win: app_state.set_window_geometry("folder", GazoControl.folder_win.geometry())
         if GazoControl.file_win: app_state.set_window_geometry("file", GazoControl.file_win.geometry())
+        if thumbnail_window: app_state.set_window_geometry("thumbnail", thumbnail_window.geometry())
         # メインウィンドウは koRoot
         app_state.set_window_geometry("main", koRoot.geometry())
+        app_state.show_thumbnail_window = show_thumbnail_win.get()
+        app_state.thumbnail_rows = thumbnail_window.rows_var.get()
+        app_state.thumbnail_columns = thumbnail_window.columns_var.get()
+        app_state.thumbnail_width = thumbnail_window.width_var.get()
+        app_state.thumbnail_height = thumbnail_window.height_var.get()
 
         # ベクトルウィンドウの位置と表示状態保存
         if vector_window:

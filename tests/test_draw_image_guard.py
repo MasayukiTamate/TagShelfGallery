@@ -411,6 +411,78 @@ def test_focus_event_uses_main_module_without_reimport(tmp_path, monkeypatch):
     assert calls == [(str(temp_png), expected_hash)]
 
 
+def test_build_thumbnail_photo_resizes_image_for_preview(tmp_path, monkeypatch):
+    import GazoToolsLogic as logic_module
+
+    class FakeImage:
+        def __init__(self):
+            self.size = (100, 50)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def resize(self, size, method):
+            return ("resized", size, method)
+
+    captured = {}
+
+    monkeypatch.setattr(logic_module.Image, "open", lambda *args, **kwargs: FakeImage())
+    monkeypatch.setattr(logic_module.ImageTk, "PhotoImage", lambda image=None, **kwargs: captured.setdefault("image", image) or object())
+
+    temp_png = tmp_path / "sample.png"
+    temp_png.write_bytes(b"x")
+    photo = logic_module.build_thumbnail_photo(str(temp_png), size=(120, 120), master=None)
+
+    assert photo is not None
+    assert captured["image"] == ("resized", (120, 120), logic_module.Image.LANCZOS)
+
+
+def test_resize_window_keeps_image_aspect_ratio(tmp_path, monkeypatch):
+    import GazoToolsLogic as logic_module
+
+    class FakeImage:
+        width = 200
+        height = 100
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    class FakeCanvas:
+        def __init__(self):
+            self.image = None
+            self.width = 240
+            self.height = 120
+            self._image_id = "img"
+
+        def itemconfig(self, *args, **kwargs):
+            return None
+
+        def configure(self, **kwargs):
+            if "width" in kwargs:
+                self.width = kwargs["width"]
+            if "height" in kwargs:
+                self.height = kwargs["height"]
+
+    captured = {}
+
+    monkeypatch.setattr(logic_module.Image, "open", lambda *args, **kwargs: FakeImage())
+    monkeypatch.setattr(logic_module.ImageOps, "contain", lambda img, size, method: ("contained", size, method))
+    monkeypatch.setattr(logic_module.ImageTk, "PhotoImage", lambda image=None, **kwargs: captured.setdefault("image", image) or object())
+
+    temp_png = tmp_path / "sample.png"
+    temp_png.write_bytes(b"x")
+    canvas = FakeCanvas()
+    logic_module.resize_canvas_image_to_fit(canvas, str(temp_png), (240, 120))
+
+    assert captured["image"] == ("contained", (240, 120), logic_module.Image.LANCZOS)
+
+
 def test_drawing_ignores_none_filename():
     picture = GazoPicture.__new__(GazoPicture)
     picture.parent = None

@@ -44,6 +44,11 @@ class AppState:
         self.show_rating_window = True     # 評価ウィンドウ表示
         self.show_info_window = False      # 情報ウィンドウ表示
         self.show_vector_window = False    # ベクトルウィンドウ表示 (初期値False)
+        self.show_thumbnail_window = True  # サムネイルパネル表示
+        self.thumbnail_rows = 3
+        self.thumbnail_columns = 4
+        self.thumbnail_width = 500
+        self.thumbnail_height = 500
         self.random_pos = False
         self.random_size = False
         self.topmost = True
@@ -81,7 +86,9 @@ class AppState:
         self.window_geometries = {
             "main": None,
             "folder": None,
-            "file": None
+            "file": None,
+            "thumbnail": None,
+            "vector_window_geometry": None,
         }
         
         # リソース監視設定
@@ -452,6 +459,11 @@ class AppState:
                 "show_rating_window": self.show_rating_window,
                 "show_vector_window": self.show_vector_window,
                 "show_info_window": self.show_info_window,
+                "show_thumbnail_window": self.show_thumbnail_window,
+                "thumbnail_rows": self.thumbnail_rows,
+                "thumbnail_columns": self.thumbnail_columns,
+                "thumbnail_width": self.thumbnail_width,
+                "thumbnail_height": self.thumbnail_height,
                 "rating_ui": self.rating_ui,
                 "ss_mode": self.ss_mode,
                 "ss_interval": self.ss_interval,
@@ -497,6 +509,13 @@ class AppState:
                 self.show_rating_window = settings.get("show_rating_window", True)
                 self.show_vector_window = settings.get("show_vector_window", False)
                 self.show_info_window = settings.get("show_info_window", False)
+                self.show_thumbnail_window = settings.get("show_thumbnail_window", True)
+                self.thumbnail_rows = max(1, int(settings.get("thumbnail_rows", 3)))
+                self.thumbnail_columns = max(1, int(settings.get("thumbnail_columns", 4)))
+                saved_width = int(settings.get("thumbnail_width", 500))
+                saved_height = int(settings.get("thumbnail_height", 500))
+                self.thumbnail_width = max(32, 500 if saved_width == 160 else saved_width)
+                self.thumbnail_height = max(32, 500 if saved_height == 160 else saved_height)
                 self.rating_ui = settings.get("rating_ui", {
                     "text_font_size": 10,
                     "star_font_size": 16,

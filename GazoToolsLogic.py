@@ -31,6 +31,44 @@ logger = LoggerManager.get_logger(__name__)
 app_state = get_app_state()
 
 
+def build_thumbnail_photo(file_path, size=(120, 120), master=None):
+    """画像ファイルから小さなプレビューフォトを生成する。"""
+    if not file_path or not os.path.exists(file_path):
+        return None
+
+    try:
+        with Image.open(file_path) as img:
+            resized = img.resize(size, Image.LANCZOS)
+            if master is not None:
+                return ImageTk.PhotoImage(master=master, image=resized)
+            return ImageTk.PhotoImage(image=resized)
+    except Exception as exc:
+        logger.warning(f"サムネイル作成失敗: {file_path} ({exc})")
+        return None
+
+
+def resize_canvas_image_to_fit(canvas, file_path, target_size):
+    """キャンバスのサイズに合わせて、縦横比を保ったまま画像を再描画する。"""
+    if canvas is None or not file_path or not os.path.exists(file_path):
+        return None
+
+    try:
+        with Image.open(file_path) as img:
+            fit_size = tuple(max(1, int(v)) for v in target_size)
+            resized = ImageOps.contain(img, fit_size, method=Image.LANCZOS)
+            photo = ImageTk.PhotoImage(image=resized)
+            canvas.image = photo
+            canvas.configure(width=fit_size[0], height=fit_size[1])
+            if hasattr(canvas, "_image_id") and canvas.find_all():
+                canvas.itemconfig(canvas._image_id, image=photo)
+            else:
+                canvas._image_id = canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+            return photo
+    except Exception as exc:
+        logger.warning(f"画像のリサイズ失敗: {file_path} ({exc})")
+        return None
+
+
 def get_label_text(widget, default=""):
     """Tkのラベル文字列取得を安全に扱う。cget('text') が None の場合も空文字に正規化する。"""
     try:
@@ -1372,12 +1410,25 @@ class GazoPicture():
             # メイン領域: 画像キャンバス
             frame = tk.Frame(win)
             frame.pack(expand=True, fill=tk.BOTH)
-            canvas = tk.Canvas(frame, width=new_w, height=new_h)
-            canvas.pack(side=tk.TOP)
-            canvas.image = tkimg
+            canvas = tk.Canvas(frame, width=new_w, height=new_h, bg="#ffffff")
+            canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
             win._tk_image_refs = getattr(win, '_tk_image_refs', [])
             win._tk_image_refs.append(tkimg)
-            canvas.create_image(0, 0, image=tkimg, anchor=tk.NW)
+            canvas._image_id = canvas.create_image(0, 0, image=tkimg, anchor=tk.NW)
+            canvas.image = tkimg
+
+            def on_canvas_resize(event=None):
+                try:
+                    target_w = max(1, canvas.winfo_width())
+                    target_h = max(1, canvas.winfo_height())
+                    if target_w <= 1 or target_h <= 1:
+                        target_w, target_h = new_w, new_h
+                    resize_canvas_image_to_fit(canvas, fullName, (target_w, target_h))
+                except Exception as exc:
+                    logger.warning(f"画像サイズ再計算失敗: {exc}")
+
+            canvas.bind("<Configure>", on_canvas_resize)
+            on_canvas_resize()
 
                 # 解釈テキストを表示するラベル（スクロール不要の短い要約を想定）
             interp_label = tk.Label(frame, text="", justify=tk.LEFT, anchor="w", bg="#ffffff", fg="#000000", wraplength=new_w - 8)
