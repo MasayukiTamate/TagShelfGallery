@@ -1200,7 +1200,39 @@ class GazoPicture():
         if GazoPicture._info_window:
             GazoPicture._info_window.withdraw()
 
-    def Drawing(self, fileName):
+    def _navigate_image(self, win, current_full_name, direction):
+        """左右キーでフォルダ内の前後の画像に切り替える。"""
+        folder = os.path.dirname(current_full_name)
+        try:
+            names = sorted(GetGazoFiles(os.listdir(folder), folder))
+        except Exception:
+            return
+        full_paths = [os.path.normcase(os.path.abspath(os.path.join(folder, n))) for n in names]
+        if current_full_name not in full_paths or len(full_paths) < 2:
+            return
+        idx = full_paths.index(current_full_name)
+        next_path = full_paths[(idx + direction) % len(full_paths)]
+
+        size_override = None
+        position_override = None
+        if app_state.nav_fit_to_window_size:
+            try:
+                chrome_h = (40 if app_state.vector_display.get("enabled", True) else 0) + 30
+                size_override = (max(1, win.winfo_width()), max(1, win.winfo_height() - chrome_h))
+            except Exception:
+                size_override = None
+            try:
+                position_override = (win.winfo_x(), win.winfo_y())
+            except Exception:
+                position_override = None
+
+        if current_full_name in self.open_windows:
+            del self.open_windows[current_full_name]
+        win.destroy()
+
+        self.Drawing(next_path, size_override=size_override, position_override=position_override)
+
+    def Drawing(self, fileName, size_override=None, position_override=None):
         if not fileName or not isinstance(fileName, str):
             logger.warning(f"画像表示スキップ: fileName が None/非文字列です ({type(fileName).__name__})")
             return
@@ -1234,15 +1266,18 @@ class GazoPicture():
                 screen_h = self.parent.winfo_screenheight()
                 
                 # 最大サイズの決定（0の場合は画面サイズの80%を使用）
-                if app_state.image_max_width > 0:
-                    limit_w = app_state.image_max_width
+                if size_override is not None:
+                    limit_w, limit_h = size_override
                 else:
-                    limit_w = screen_w * 0.8
-                
-                if app_state.image_max_height > 0:
-                    limit_h = app_state.image_max_height
-                else:
-                    limit_h = screen_h * 0.8
+                    if app_state.image_max_width > 0:
+                        limit_w = app_state.image_max_width
+                    else:
+                        limit_w = screen_w * 0.8
+
+                    if app_state.image_max_height > 0:
+                        limit_h = app_state.image_max_height
+                    else:
+                        limit_h = screen_h * 0.8
                 
                 # アスペクト比を維持してスケールを計算
                 scale = min(limit_w / orig_w, limit_h / orig_h)
@@ -1267,17 +1302,21 @@ class GazoPicture():
                     new_h = app_state.image_min_height
                 
                 # 最大サイズを再チェック（最小サイズ適用後の確認）
-                if app_state.image_max_width > 0 and new_w > app_state.image_max_width:
-                    scale = app_state.image_max_width / new_w
-                    new_w = app_state.image_max_width
-                    new_h = int(new_h * scale)
-                if app_state.image_max_height > 0 and new_h > app_state.image_max_height:
-                    scale = app_state.image_max_height / new_h
-                    new_w = int(new_w * scale)
-                    new_h = app_state.image_max_height
+                # size_override 指定時はオーバーライドしたサイズがグローバル設定で
+                # 再度クランプされてしまうため、このチェックはスキップする。
+                if size_override is None:
+                    if app_state.image_max_width > 0 and new_w > app_state.image_max_width:
+                        scale = app_state.image_max_width / new_w
+                        new_w = app_state.image_max_width
+                        new_h = int(new_h * scale)
+                    if app_state.image_max_height > 0 and new_h > app_state.image_max_height:
+                        scale = app_state.image_max_height / new_h
+                        new_w = int(new_w * scale)
+                        new_h = app_state.image_max_height
 
                 # ランダムサイズが有効な場合、スケールをランダムに変更
-                if self.random_size.get():
+                # (size_override 指定時は決定的に窓へフィットさせるためスキップ)
+                if size_override is None and self.random_size.get():
                     # 最小スケールと最大スケールを計算
                     min_scale_w = app_state.image_min_width / new_w if app_state.image_min_width > 0 and new_w > 0 else 0.5
                     min_scale_h = app_state.image_min_height / new_h if app_state.image_min_height > 0 and new_h > 0 else 0.5
@@ -1325,7 +1364,9 @@ class GazoPicture():
                 del img_resized # 不要になったので即座に掃除するのじゃ
 
             # 表示位置の計算
-            if self.random_pos.get():
+            if position_override is not None:
+                base_x, base_y = position_override
+            elif self.random_pos.get():
                 base_x = random.randint(0, max(0, screen_w - new_w))
                 base_y = random.randint(0, max(0, screen_h - new_h))
             else:
@@ -1424,6 +1465,9 @@ class GazoPicture():
 
             for _i in range(9):
                 win.bind(f"<Key-{_i+1}>", make_shortcut_toggle_handler(_i))
+
+            win.bind("<Left>", lambda event: self._navigate_image(win, fullName, -1))
+            win.bind("<Right>", lambda event: self._navigate_image(win, fullName, 1))
 
             # 表示するUI要素によって高さを動的に調整
             text_area_h = 0

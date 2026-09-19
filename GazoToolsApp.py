@@ -1011,6 +1011,14 @@ def on_continuous_tagging_change(*args):
 continuous_tagging.trace_add("write", on_continuous_tagging_change)
 config_menu.add_checkbutton(label="連続タグ付けモード", variable=continuous_tagging)
 
+# 左右キー移動時の窓サイズ維持設定
+nav_fit_to_window_size = tk.BooleanVar(value=app_state.nav_fit_to_window_size)
+def on_nav_fit_to_window_size_change(*args):
+    app_state.nav_fit_to_window_size = nav_fit_to_window_size.get()
+
+nav_fit_to_window_size.trace_add("write", on_nav_fit_to_window_size_change)
+config_menu.add_checkbutton(label="前後移動(←→)で窓のサイズを維持する", variable=nav_fit_to_window_size)
+
 
 # 開いているウィンドウのサイズを再調整する関数
 def update_open_windows_size():
@@ -1398,6 +1406,15 @@ def on_thumbnail_select(file_path, open_image=False):
     else:
         update_active_tag_target(file_path)
 
+def on_thumbnail_edit_tag(file_path):
+    """サムネイルの右クリックメニュー、またはショートカットキー(t)からタグ編集窓を呼び出す。"""
+    if not file_path or not os.path.exists(file_path):
+        return
+    update_active_tag_target(file_path)
+    tag_edit_window.deiconify()
+    tag_edit_window.lift()
+    tag_edit_window.entry.focus_set()
+
 thumbnail_windows = []
 
 def remove_thumbnail_window(window):
@@ -1416,6 +1433,7 @@ def create_thumbnail_window():
         close_callback=remove_thumbnail_window,
         window_number=len(thumbnail_windows) + 1,
         gazo_control=GazoControl,
+        edit_tag_callback=on_thumbnail_edit_tag,
     )
     thumbnail_windows.append(window)
     window.show()

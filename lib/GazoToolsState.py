@@ -42,6 +42,7 @@ class AppState:
         from lib.config_defaults import SHORTCUT_TAG_KEY_COUNT
         self.shortcut_tags = [""] * SHORTCUT_TAG_KEY_COUNT
         self.continuous_tagging_mode = False  # 連続タグ付けモード
+        self.nav_fit_to_window_size = True  # 左右キー移動時に窓の大きさを維持するか
 
         # UI 表示設定
         self.show_folder_window = True
@@ -472,6 +473,7 @@ class AppState:
                 "show_shortcut_key_bar": self.show_shortcut_key_bar,
                 "shortcut_tags": self.shortcut_tags,
                 "continuous_tagging_mode": self.continuous_tagging_mode,
+                "nav_fit_to_window_size": self.nav_fit_to_window_size,
                 "thumbnail_rows": self.thumbnail_rows,
                 "thumbnail_columns": self.thumbnail_columns,
                 "thumbnail_width": self.thumbnail_width,
@@ -524,6 +526,7 @@ class AppState:
                 self.show_thumbnail_window = settings.get("show_thumbnail_window", True)
                 self.show_shortcut_key_bar = settings.get("show_shortcut_key_bar", True)
                 self.continuous_tagging_mode = settings.get("continuous_tagging_mode", False)
+                self.nav_fit_to_window_size = settings.get("nav_fit_to_window_size", True)
                 from lib.config_defaults import SHORTCUT_TAG_KEY_COUNT
                 loaded_shortcuts = settings.get("shortcut_tags", [])
                 if len(loaded_shortcuts) < SHORTCUT_TAG_KEY_COUNT:

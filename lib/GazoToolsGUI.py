@@ -67,12 +67,13 @@ class ThumbnailPanelWindow(tk.Toplevel):
 
     _TARGET_HIGHLIGHT_COLOR = "#4a90e2"
 
-    def __init__(self, parent, files=None, select_callback=None, close_callback=None, window_number=1, gazo_control=None):
+    def __init__(self, parent, files=None, select_callback=None, close_callback=None, window_number=1, gazo_control=None, edit_tag_callback=None):
         super().__init__(parent)
         self.title(f"画像サムネイル {window_number}")
         self.attributes("-topmost", bool(app_state.topmost))
         self.select_callback = select_callback
         self.close_callback = close_callback
+        self.edit_tag_callback = edit_tag_callback
         self.gazo_control = gazo_control
         self.all_files = []
         self.files = []
@@ -136,6 +137,7 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self.bind("<MouseWheel>", self._on_mousewheel)
         self.geometry("900x700")
         self.bind("<Control-w>", lambda event: self.withdraw())
+        self.bind("<Key-t>", self._on_edit_tag_shortcut)
         self.protocol("WM_DELETE_WINDOW", self._close_window)
         self.set_files(files or [])
 
@@ -367,6 +369,7 @@ class ThumbnailPanelWindow(tk.Toplevel):
 
     def _select(self, file_path, open_image=False):
         self.set_target_path(file_path)
+        self.focus_set()
         if self.select_callback:
             self.select_callback(file_path, open_image)
 
@@ -380,9 +383,18 @@ class ThumbnailPanelWindow(tk.Toplevel):
             except tk.TclError:
                 continue
 
+    def _edit_tag(self, file_path):
+        if self.edit_tag_callback:
+            self.edit_tag_callback(file_path)
+
+    def _on_edit_tag_shortcut(self, event=None):
+        if self.target_path:
+            self._edit_tag(self.target_path)
+
     def _show_context_menu(self, event, file_path):
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="画像を開く", command=lambda: self._select(file_path, open_image=True))
+        menu.add_command(label="タグ編集", command=lambda: self._edit_tag(file_path))
         menu.add_command(label="パスをコピー", command=lambda: self._copy_path(file_path))
         menu.add_separator()
         menu.add_command(label="このサムネイル窓を隠す", command=self.withdraw)
