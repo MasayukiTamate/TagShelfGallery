@@ -6,6 +6,7 @@ import os
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
+from tkinterdnd2 import DND_FILES
 from PIL import Image, ImageTk, ImageOps
 import random
 import threading
@@ -18,6 +19,18 @@ from lib.GazoToolsLogger import get_logger
 from lib.GazoToolsState import get_app_state
 from lib.GazoToolsAI import VectorEngine
 from lib.GazoToolsLib import GetGazoFiles
+from lib.GazoToolsTagFilter import (
+    get_tag_filter_state,
+    collect_all_tags,
+    filter_file_names_by_tags,
+    find_files_for_tag,
+)
+from lib.config_defaults import (
+    COLOR_REGISTER_BG,
+    COLOR_MOVE_BG_1,
+    COLOR_MOVE_BG_2,
+    get_move_grid_columns,
+)
 
 # 相対インポートではなく、ルートからのインポートを使用
 # (アプリ実行時のパス構成に依存)
@@ -28,7 +41,7 @@ import sys
 # 現在の構造上、GazoToolsLogicにある関数(calculate_file_hash, load_vectorsなど)が必要です。
 # GazoToolsLogicがGazoToolsGUIをトップレベルでインポートしていなければ、ここでインポートしても安全です。
 try:
-    from GazoToolsLogic import calculate_file_hash, load_vectors
+    from GazoToolsLogic import calculate_file_hash, load_vectors, save_tags
 except ImportError:
     # パスが通っていない場合（単体テストなど）の対策
     # 本番実行時は GazoToolsApp.py がルートにあるので通るはず
@@ -36,6 +49,7 @@ except ImportError:
 
 logger = get_logger(__name__)
 app_state = get_app_state()
+tag_filter_state = get_tag_filter_state()
 
 
 def calculate_thumbnail_tile_size(canvas_width, canvas_height, rows, columns, base_width, base_height):
@@ -738,3 +752,420 @@ class VectorWindow(tk.Toplevel):
     def show(self):
         self.deiconify()
         self.lift()
+
+
+class MoveDestinationArea(tk.Frame):
+    """ドラッグ&ドロップによるファイル移動先の登録・振り分けエリア。"""
+
+    def __init__(self, parent, move_callback, refresh_callback=None):
+        super().__init__(parent)
+        self.move_callback = move_callback
+        self.refresh_callback = refresh_callback
+        self.move_labels = []
+        self.move_text_vars = []
+
+        self.text_reg = tk.StringVar(self)
+        self.lbl_reg = tk.Label(self, textvariable=self.text_reg, bg=COLOR_REGISTER_BG, height=2, bd=2, relief="groove")
+        self.lbl_reg.drop_target_register(DND_FILES)
+        self.lbl_reg.dnd_bind("<<Drop>>", self._handle_drop_register)
+        self.lbl_reg.pack(fill=tk.BOTH, padx=5, pady=(5, 15))
+
+        self.move_frame = tk.Frame(self)
+        self.move_frame.pack(fill=tk.BOTH, padx=5, pady=(0, 5), expand=True)
+
+        self.btn_reset = tk.Button(self, text="全登録フォルダをリセット", bg="#fff0f0",
+                                    font=("MS Gothic", 8), command=self.reset_destinations)
+        self.btn_reset.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+        self.rebuild()
+
+    def refresh_display(self):
+        """D&Dエリアの表示内容を app_state の最新状態に合わせる。"""
+        move_dest_count = app_state.move_dest_count
+        move_reg_idx = app_state.move_reg_idx
+        move_dest_list = app_state.move_dest_list
+
+        marks = []
+        for i in range(move_dest_count):
+            if i == move_reg_idx:
+                marks.append("◎")
+            elif move_dest_list[i]:
+                marks.append("●")
+            else:
+                marks.append("○")
+
+        self.text_reg.set(f"登録[次:{move_reg_idx+1}]: {' '.join(marks)}")
+
+        for i in range(move_dest_count):
+            if i < len(self.move_text_vars):
+                path = move_dest_list[i] if i < len(move_dest_list) else ""
+                if path:
+                    self.move_text_vars[i].set(f"{i+1}: {os.path.basename(path)}")
+                else:
+                    self.move_text_vars[i].set(f"{i+1}: (未登録)")
+
+    def rebuild(self):
+        """移動先エリアを現在の登録数に合わせて作り直す。"""
+        for lbl in self.move_labels:
+            lbl.destroy()
+        self.move_labels.clear()
+        self.move_text_vars.clear()
+
+        move_dest_count = app_state.move_dest_count
+        cols = get_move_grid_columns(move_dest_count)
+
+        for i in range(move_dest_count):
+            tv = tk.StringVar(self)
+            bg_color = COLOR_MOVE_BG_1 if (i % 2 == 0) else COLOR_MOVE_BG_2
+            f_size = 8 if move_dest_count > 8 else 9
+
+            l = tk.Label(self.move_frame, textvariable=tv, bg=bg_color, font=("MS Gothic", f_size), height=2, bd=1, relief="ridge")
+            l.drop_target_register(DND_FILES)
+            l.dnd_bind("<<Drop>>", self._make_drop_func(i))
+            l.grid(row=i // cols, column=i % cols, sticky="nsew", padx=1, pady=1)
+
+            self.move_labels.append(l)
+            self.move_text_vars.append(tv)
+
+        for c in range(cols):
+            self.move_frame.columnconfigure(c, weight=1)
+        for r in range((move_dest_count + cols - 1) // cols):
+            self.move_frame.rowconfigure(r, weight=1)
+
+        self.refresh_display()
+
+    def reset_destinations(self):
+        if not messagebox.askyesno("確認", "全ての登録フォルダ設定をリセットしても良いかの？"):
+            return
+        app_state.reset_move_destinations()
+        self.refresh_display()
+        logger.info("[RESET] 全ての移動先をリセットしました")
+
+    def _handle_drop_register(self, event):
+        data = event.data
+        if data.startswith('{') and data.endswith('}'):
+            data = data[1:-1]
+        path = os.path.normpath(data)
+
+        if os.path.isdir(path):
+            app_state.set_move_destination(app_state.move_reg_idx, path)
+            app_state.rotate_move_reg_idx()
+            self.refresh_display()
+            logger.info(f"[REGISTER] スロット{app_state.move_reg_idx}に登録: {path}")
+        else:
+            messagebox.showwarning("注意", "ここはフォルダ登録用なのじゃ！ファイルを動かしたいなら下へ入れるのじゃ。")
+
+    def _make_drop_func(self, idx):
+        def drop_handler(event):
+            try:
+                files = self.tk.splitlist(event.data)
+                count = 0
+                for f in files:
+                    p = os.path.normpath(f)
+                    if os.path.isfile(p):
+                        self.move_callback(p, app_state.move_dest_list[idx], refresh=False)
+                        count += 1
+                    elif os.path.isdir(p):
+                        messagebox.showwarning("注意", f"フォルダは移動できないのじゃ: {p}")
+
+                if count > 0:
+                    if self.refresh_callback:
+                        self.refresh_callback()
+                    logger.info(f"[BATCH MOVE] {count}個のファイルを移動して画面を更新")
+            except Exception as e:
+                logger.error(f"ドロップ処理エラー: {e}", exc_info=True)
+        return drop_handler
+
+
+class FolderListWindow(tk.Toplevel):
+    """フォルダ一覧ウィンドウ。移動先フォルダの登録・フォルダ間移動を担当する。"""
+
+    def __init__(self, parent, on_move_registered=None):
+        super().__init__(parent)
+        self.on_move_registered = on_move_registered
+        self.title("子データ窓 - フォルダ一覧")
+        self.attributes("-topmost", True)
+
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        tk.Button(btn_frame, text="↑ 上のフォルダへ", command=self._on_up_click).pack(fill=tk.X)
+
+        frame = tk.Frame(self)
+        frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
+        scrollbar = tk.Scrollbar(frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.lb = tk.Listbox(frame, yscrollcommand=scrollbar.set)
+        self.lb.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        scrollbar.config(command=self.lb.yview)
+
+        self.lb.bind("<Button-3>", self._on_right_click)
+        self.lb.bind("<Double-Button-1>", self._on_double_click)
+
+    def refresh(self, folders, files, current_folder):
+        """フォルダ・ファイル一覧に基づいて表示内容を更新する。"""
+        self.lb.delete(0, tk.END)
+        try:
+            current_name = os.path.basename(current_folder) or current_folder
+            self.lb.insert(tk.END, f"({len(files)}) [現在] {current_name}")
+        except Exception:
+            self.lb.insert(tk.END, "(-) [現在] ???")
+
+        for f in folders:
+            try:
+                sub_items = os.listdir(os.path.join(current_folder, f))
+                count = len(GetGazoFiles(sub_items, os.path.join(current_folder, f)))
+                self.lb.insert(tk.END, f"({count}) {f}")
+            except Exception:
+                self.lb.insert(tk.END, f"(-) {f}")
+
+    def _on_up_click(self):
+        app_state.set_current_folder(os.path.dirname(app_state.current_folder))
+
+    def _on_right_click(self, event):
+        """右クリックで移動先スロットに登録するコンテキストメニューを表示する。"""
+        try:
+            idx = self.lb.nearest(event.y)
+            self.lb.selection_clear(0, tk.END)
+            self.lb.selection_set(idx)
+            self.lb.activate(idx)
+
+            sel = self.lb.get(idx)
+            current_folder = app_state.current_folder
+            if idx == 0:
+                target_path = current_folder
+            else:
+                if ") " in sel:
+                    sel = sel.split(") ", 1)[1]
+                target_path = os.path.join(current_folder, sel)
+
+            if not os.path.isdir(target_path):
+                return
+
+            popup = tk.Menu(self, tearoff=0)
+
+            def insert_reg():
+                idx_reg = app_state.move_reg_idx
+                app_state.set_move_destination(idx_reg, target_path)
+                app_state.rotate_move_reg_idx()
+                logger.info(f"[CONTEXT] スロット{idx_reg+1}に挿入登録: {target_path}")
+                if self.on_move_registered:
+                    self.on_move_registered()
+
+            popup.add_command(label="登録を挿入", font=("MS Gothic", 9, "bold"), command=insert_reg)
+            popup.add_separator()
+
+            def make_reg_func(s_idx, p):
+                def reg():
+                    app_state.set_move_destination(s_idx, p)
+                    logger.info(f"[CONTEXT] スロット{s_idx+1}に直接登録: {p}")
+                    if self.on_move_registered:
+                        self.on_move_registered()
+                return reg
+
+            for i in range(app_state.move_dest_count):
+                cur_path = app_state.move_dest_list[i]
+                if cur_path:
+                    label_text = f"{i+1}: [{os.path.basename(cur_path)}]"
+                else:
+                    label_text = f"{i+1}: (未登録)"
+                popup.add_command(label=label_text, command=make_reg_func(i, target_path))
+
+            popup.post(event.x_root, event.y_root)
+        except Exception as e:
+            logger.error(f"右クリックエラー: {e}")
+
+    def _on_double_click(self, event):
+        try:
+            idx = self.lb.curselection()[0]
+            sel = self.lb.get(idx)
+            current_folder = app_state.current_folder
+            if idx == 0:
+                app_state.set_current_folder(current_folder)
+                return
+            if ") " in sel:
+                sel = sel.split(") ", 1)[1]
+            app_state.set_current_folder(os.path.join(current_folder, sel))
+        except Exception:
+            pass
+
+
+class TagEditorWindow(tk.Toplevel):
+    """常に表示するタグ編集・付与窓。連続入力に向いたUIにする。"""
+
+    def __init__(self, parent, gazo_control):
+        super().__init__(parent)
+        self.gazo_control = gazo_control
+        self.title("タグ編集")
+        self.attributes("-topmost", True)
+        self.geometry("380x260")
+
+        tk.Label(self, text="対象画像:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
+        self.target_var = tk.StringVar(value="未選択")
+        tk.Label(self, textvariable=self.target_var, wraplength=340, justify="left", anchor="w").pack(fill="x", padx=10)
+
+        tk.Label(self, text="タグ（; 区切り）:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
+        self.tag_var = tk.StringVar(value="")
+        self.entry = tk.Entry(self, textvariable=self.tag_var, width=40)
+        self.entry.pack(fill="x", padx=10)
+        self.entry.focus_set()
+
+        self.status_var = tk.StringVar(value="保存は Enter または 下のボタン")
+        tk.Label(self, textvariable=self.status_var, fg="#555555", anchor="w", font=("MS Gothic", 8)).pack(fill="x", padx=10, pady=(4, 0))
+
+        quick_frame = tk.Frame(self)
+        quick_frame.pack(fill="x", padx=10, pady=(6, 0))
+        tk.Label(quick_frame, text="よく使うタグ:", anchor="w").pack(fill="x")
+        tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
+        quick_tags = sorted(collect_all_tags(tag_dict))[:12]
+        quick_inner = tk.Frame(quick_frame)
+        quick_inner.pack(fill="x")
+        for tag_name in quick_tags:
+            tk.Button(quick_inner, text=tag_name, font=("MS Gothic", 8), command=lambda t=tag_name: self._append_tag(t), padx=6, pady=2).pack(side=tk.LEFT, padx=2, pady=2)
+
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(fill="x", padx=10, pady=10)
+        tk.Button(btn_frame, text="保存 (Enter)", command=self._save_current_tag).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(btn_frame, text="クリア", command=self._clear_current_tag).pack(side=tk.LEFT)
+
+        self.bind("<Return>", lambda event: self._save_current_tag())
+        self.bind("<Escape>", lambda event: self._clear_current_tag())
+
+    def set_target(self, file_path, image_hash=None):
+        """フォーカス中の画像をタグ編集対象として設定し、表示を更新する。"""
+        tag_filter_state.set_active_target(file_path, image_hash)
+        if file_path is None:
+            self.target_var.set("未選択")
+            self.tag_var.set("")
+            return
+        self.target_var.set(os.path.basename(file_path))
+        tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
+        data = tag_dict.get(image_hash or calculate_file_hash(file_path), {})
+        tag_text = data.get('tag', '') if isinstance(data, dict) else ''
+        self.tag_var.set(tag_text)
+
+    def _append_tag(self, tag_name):
+        current = (self.tag_var.get() or "").strip()
+        parts = [p.strip() for p in current.split(";") if p.strip()] if current else []
+        if tag_name not in parts:
+            parts.append(tag_name)
+        self.tag_var.set("; ".join(parts))
+        self.entry.focus_set()
+        self.entry.icursor(len(self.tag_var.get()))
+
+    def _save_current_tag(self):
+        file_path = tag_filter_state.active_target.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            self.status_var.set("対象画像が選択されていません")
+            messagebox.showwarning("タグ編集", "対象画像が選択されていません")
+            return
+        image_hash = tag_filter_state.active_target.get("image_hash") or calculate_file_hash(file_path)
+        if not image_hash:
+            self.status_var.set("ハッシュ計算に失敗しました")
+            messagebox.showerror("エラー", "画像ハッシュの計算に失敗しました")
+            return
+
+        value = (self.tag_var.get() or "").strip()
+        normalized = "; ".join(p.strip() for p in value.split(";") if p.strip()) if value else ""
+        tag_dict = self.gazo_control.tag_dict
+        if image_hash not in tag_dict:
+            tag_dict[image_hash] = {"tag": "", "hint": os.path.basename(file_path), "rating": None}
+        tag_dict[image_hash]["tag"] = normalized
+        tag_dict[image_hash]["hint"] = os.path.basename(file_path)
+        save_tags(tag_dict)
+        if hasattr(self.gazo_control, 'set_image_tag'):
+            try:
+                for open_win in self.gazo_control.open_windows.values():
+                    if getattr(open_win, '_image_hash', None) == image_hash:
+                        self.gazo_control.set_image_tag(open_win, image_hash)
+                        break
+            except Exception:
+                pass
+
+        self.status_var.set(f"保存しました: {normalized or '未設定'}")
+        self.tag_var.set("")
+        self.entry.focus_set()
+
+    def _clear_current_tag(self):
+        self.tag_var.set("")
+        self.status_var.set("入力をクリアしました")
+        self.entry.focus_set()
+
+
+class TagListWindow(tk.Toplevel):
+    """タグ一覧ウィンドウ。タグごとのファイル件数表示と絞り込みを行う。"""
+
+    def __init__(self, parent, gazo_control, on_filter_applied=None):
+        super().__init__(parent)
+        self.gazo_control = gazo_control
+        self.on_filter_applied = on_filter_applied
+        self.title("タグ一覧")
+        self.attributes("-topmost", True)
+        self.geometry("280x360")
+
+        mode_frame = tk.Frame(self)
+        mode_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
+        tk.Label(mode_frame, text="検索方式:").pack(side=tk.LEFT)
+        self.mode_var = tk.StringVar(value=tag_filter_state.mode)
+        tk.Radiobutton(mode_frame, text="AND", variable=self.mode_var, value="and", command=self._on_mode_change).pack(side=tk.LEFT)
+        tk.Radiobutton(mode_frame, text="OR", variable=self.mode_var, value="or", command=self._on_mode_change).pack(side=tk.LEFT)
+        tk.Button(mode_frame, text="クリア", command=self._on_clear).pack(side=tk.RIGHT)
+
+        tk.Label(self, text="タグ一覧", font=("Helvetica", "10", "bold")).pack(pady=(0, 4))
+
+        list_frame = tk.Frame(self)
+        list_frame.pack(expand=True, fill=tk.BOTH, padx=8, pady=8)
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tag_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
+        self.tag_listbox.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        scrollbar.config(command=self.tag_listbox.yview)
+
+        self.tag_listbox.bind("<Double-Button-1>", self._on_tag_double_click)
+        self.refresh_tag_list()
+
+    def refresh_tag_list(self):
+        self.tag_listbox.delete(0, tk.END)
+        tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
+        tags = collect_all_tags(tag_dict)
+        current_folder = app_state.current_folder
+        file_names = [
+            os.path.join(current_folder, name)
+            for name in os.listdir(current_folder)
+            if os.path.isfile(os.path.join(current_folder, name))
+        ]
+        path_to_hash = {}
+        for file_path in file_names:
+            try:
+                path_to_hash[file_path] = calculate_file_hash(file_path)
+            except Exception:
+                continue
+
+        for tag_name in tags:
+            matches = find_files_for_tag(file_names, path_to_hash, tag_dict, tag_name)
+            self.tag_listbox.insert(tk.END, f"{tag_name} ({len(matches)})")
+
+    def _on_mode_change(self):
+        tag_filter_state.set_mode(self.mode_var.get())
+        if self.on_filter_applied:
+            self.on_filter_applied()
+
+    def _on_clear(self):
+        tag_filter_state.clear_filter()
+        if self.on_filter_applied:
+            self.on_filter_applied()
+
+    def _on_tag_double_click(self, event):
+        try:
+            idx = self.tag_listbox.curselection()
+            if not idx:
+                return
+            selected_text = self.tag_listbox.get(idx[0])
+            tag_name = selected_text.rsplit(" (", 1)[0]
+
+            tag_filter_state.set_active_filter([tag_name])
+            if self.on_filter_applied:
+                self.on_filter_applied()
+
+            messagebox.showinfo("タグ検索", f"タグ '{tag_name}' を適用して一覧を更新しました")
+        except Exception as e:
+            logger.warning(f"タグ詳細表示エラー: {e}")

@@ -35,66 +35,36 @@ from lib.GazoToolsTagFilter import (
     collect_all_tags,
     filter_file_names_by_tags,
     parse_tag_text,
-    find_files_for_tag,
+    get_tag_filter_state,
 )
 from lib.config_defaults import (
     calculate_folder_window_width, calculate_folder_window_height,
     calculate_file_window_width, calculate_file_window_height,
-    WINDOW_SPACING, SCREEN_MARGIN, COLOR_MOVE_BG_1, COLOR_CPU_LOW, COLOR_CPU_HIGH,
-    get_move_grid_columns, MOVE_DESTINATION_SLOTS, MOVE_DESTINATION_MIN,
-    MOVE_DESTINATION_OPTIONS, COLOR_MOVE_BG_2, SS_INTERVAL_OPTIONS, 
-    MIN_AI_THRESHOLD, MAX_AI_THRESHOLD, DEFAULT_AI_THRESHOLD, COLOR_REGISTER_BG,
+    WINDOW_SPACING, SCREEN_MARGIN, COLOR_CPU_LOW, COLOR_CPU_HIGH,
+    MOVE_DESTINATION_SLOTS, MOVE_DESTINATION_MIN,
+    MOVE_DESTINATION_OPTIONS, SS_INTERVAL_OPTIONS,
+    MIN_AI_THRESHOLD, MAX_AI_THRESHOLD, DEFAULT_AI_THRESHOLD,
     RATING_SIZE_PRESETS, RATING_POSITION_PRESETS
 )
-from lib.GazoToolsGUI import SplashWindow, SimilarityMoveDialog, VectorWindow, ThumbnailPanelWindow
+from lib.GazoToolsGUI import (
+    SplashWindow, SimilarityMoveDialog, VectorWindow, ThumbnailPanelWindow,
+    MoveDestinationArea, FolderListWindow, TagEditorWindow, TagListWindow,
+)
 
 # --- アプリケーション状態の初期化 ---
 app_state = get_app_state()
-ACTIVE_TAG_FILTER = []
-TAG_FILTER_MODE = "and"
-ACTIVE_TAG_TARGET = {"file_path": None, "image_hash": None}
+tag_filter_state = get_tag_filter_state()
 
 
 def update_active_tag_target(file_path, image_hash=None):
-    """現在フォーカス中の画像をタグ編集窓の対象に設定する。"""
-    global ACTIVE_TAG_TARGET
-    if file_path is None:
-        ACTIVE_TAG_TARGET = {"file_path": None, "image_hash": None}
-        if 'tag_edit_window' in globals() and tag_edit_window is not None:
-            try:
-                tag_edit_window_target_var.set("未選択")
-                tag_edit_window_tag_var.set("")
-            except Exception:
-                pass
-        return
-
-    ACTIVE_TAG_TARGET = {"file_path": file_path, "image_hash": image_hash}
+    """現在フォーカス中の画像をタグ編集窓の対象に設定する。
+    互換エントリポイント: GazoPicture.Drawing が sys.modules 経由で呼ぶ。"""
+    tag_filter_state.set_active_target(file_path, image_hash)
     if 'tag_edit_window' in globals() and tag_edit_window is not None:
         try:
-            tag_edit_window_target_var.set(os.path.basename(file_path))
-            data = GazoControl.tag_dict.get(image_hash or calculate_file_hash(file_path), {}) if hasattr(GazoControl, 'tag_dict') else {}
-            tag_text = data.get('tag', '') if isinstance(data, dict) else ''
-            tag_edit_window_tag_var.set(tag_text)
+            tag_edit_window.set_target(file_path, image_hash)
         except Exception:
             pass
-
-
-def set_tag_filter_mode(mode):
-    """タグ検索モードを変更し、現在の一覧を再描画する。"""
-    global TAG_FILTER_MODE
-    TAG_FILTER_MODE = mode if mode in ("and", "or") else "and"
-    if 'file_listbox' in globals() and 'DEFOLDER' in globals():
-        current_files = [name for name in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, name))]
-        refresh_file_listbox_with_tag_filter(current_files)
-
-
-def clear_active_tag_filter():
-    """タグフィルタを解除して全件表示に戻す。"""
-    global ACTIVE_TAG_FILTER
-    ACTIVE_TAG_FILTER = []
-    if 'file_listbox' in globals() and 'DEFOLDER' in globals():
-        current_files = [name for name in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, name))]
-        refresh_file_listbox_with_tag_filter(current_files)
 
 
 def refresh_file_listbox_with_tag_filter(file_names):
@@ -103,7 +73,7 @@ def refresh_file_listbox_with_tag_filter(file_names):
         return
 
     file_listbox.delete(0, tk.END)
-    if not ACTIVE_TAG_FILTER:
+    if not tag_filter_state.active_filter:
         for name in file_names:
             file_listbox.insert(tk.END, name)
         return
@@ -121,8 +91,8 @@ def refresh_file_listbox_with_tag_filter(file_names):
         full_paths,
         path_hash_map,
         GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {},
-        ACTIVE_TAG_FILTER,
-        mode=TAG_FILTER_MODE,
+        tag_filter_state.active_filter,
+        mode=tag_filter_state.mode,
     )
     for full_path in filtered:
         file_listbox.insert(tk.END, os.path.basename(full_path))
@@ -206,15 +176,15 @@ def on_app_state_changed(event_name, data):
         
         elif event_name == "move_destination_changed":
             # 移動先変更時の表示更新
-            update_dd_display()
-        
+            move_area.refresh_display()
+
         elif event_name == "move_reg_idx_changed":
             # 登録先インデックス変更時の表示更新
-            update_dd_display()
-        
+            move_area.refresh_display()
+
         elif event_name == "move_dest_count_changed":
             # 移動先個数変更時
-            rebuild_move_area()
+            move_area.rebuild()
         
         elif event_name == "show_folder_window_changed":
             # フォルダウィンドウ表示切り替え
@@ -277,21 +247,9 @@ def refresh_ui(new_path):
     koRoot.title("画像tools - " + DEFOLDER)
     save_config(DEFOLDER)
     
-    folder_listbox.delete(0, tk.END)
-    try:
-        current_name = os.path.basename(DEFOLDER) or DEFOLDER
-        folder_listbox.insert(tk.END, f"({len(files)}) [現在] {current_name}")
-    except:
-        folder_listbox.insert(tk.END, "(-) [現在] ???")
+    if 'folder_win' in globals():
+        folder_win.refresh(folders, files, DEFOLDER)
 
-    for f in folders:
-        try:
-            sub_items = os.listdir(os.path.join(DEFOLDER, f))
-            count = len(GetGazoFiles(sub_items, os.path.join(DEFOLDER, f)))
-            folder_listbox.insert(tk.END, f"({count}) {f}")
-        except:
-            folder_listbox.insert(tk.END, f"(-) {f}")
-    
     refresh_file_listbox_with_tag_filter(files)
 
     if 'thumbnail_windows' in globals():
@@ -323,242 +281,6 @@ def adjust_window_layouts(folders, files):
     
     folder_win.geometry(f_geo)
     file_win.geometry(g_geo)
-
-
-def create_folder_list_window(parent, folders):
-    win = tk.Toplevel(parent)
-    win.title("子データ窓 - フォルダ一覧")
-    win.attributes("-topmost", True)
-    
-    btn_frame = tk.Frame(win)
-    btn_frame.pack(fill=tk.X, padx=5, pady=5)
-    tk.Button(btn_frame, text="↑ 上のフォルダへ", command=lambda: app_state.set_current_folder(os.path.dirname(DEFOLDER))).pack(fill=tk.X)
-
-    frame = tk.Frame(win)
-    frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
-    scrollbar = tk.Scrollbar(frame)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    lb = tk.Listbox(frame, yscrollcommand=scrollbar.set)
-    for folder in folders: lb.insert(tk.END, folder)
-    lb.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
-    scrollbar.config(command=lb.yview)
-
-    def on_right_click(event):
-        """右クリックで移動先スロットに登録するコンテキストメニューを表示するのじゃ。"""
-        try:
-            # クリック位置のインデックスを取得
-            idx = lb.nearest(event.y)
-            lb.selection_clear(0, tk.END)
-            lb.selection_set(idx)
-            lb.activate(idx)
-            
-            sel = lb.get(idx)
-            if idx == 0:
-                target_path = DEFOLDER
-            else:
-                if ") " in sel: sel = sel.split(") ", 1)[1]
-                target_path = os.path.join(DEFOLDER, sel)
-            
-            if not os.path.isdir(target_path): return
-
-            # メニューの作成
-            popup = tk.Menu(win, tearoff=0)
-            
-            def insert_reg():
-                global move_reg_idx
-                move_dest_list[move_reg_idx] = target_path
-                print(f"[CONTEXT] スロット{move_reg_idx+1}に挿入登録: {target_path}")
-                move_reg_idx = (move_reg_idx + 1) % move_dest_count
-                update_dd_display()
-
-            popup.add_command(label="登録を挿入", font=("MS Gothic", 9, "bold"), command=insert_reg)
-            popup.add_separator()
-
-            def make_reg_func(s_idx, p):
-                def reg():
-                    move_dest_list[s_idx] = p
-                    update_dd_display()
-                    print(f"[CONTEXT] スロット{s_idx+1}に直接登録: {p}")
-                return reg
-
-            # 全てのスロットの状況（フォルダ名または未登録）を表示するのじゃ
-            for i in range(move_dest_count):
-                cur_path = move_dest_list[i]
-                if cur_path:
-                    label_text = f"{i+1}: [{os.path.basename(cur_path)}]"
-                else:
-                    label_text = f"{i+1}: (未登録)"
-                
-                popup.add_command(label=label_text, command=make_reg_func(i, target_path))
-
-            popup.post(event.x_root, event.y_root)
-        except Exception as e:
-            print(f"右クリックエラー: {e}")
-
-    def on_double_click(event):
-        try:
-            idx = lb.curselection()[0]
-            sel = lb.get(idx)
-            if idx == 0: app_state.set_current_folder(DEFOLDER); return
-            if ") " in sel: sel = sel.split(") ", 1)[1]
-            app_state.set_current_folder(os.path.join(DEFOLDER, sel))
-        except: pass
-
-    lb.bind("<Button-3>", on_right_click)
-    lb.bind("<Double-Button-1>", on_double_click)
-    return win, lb
-
-def create_tag_editor_window(parent):
-    """常に表示するタグ編集・付与窓を作成する。連続入力に向いたUIにする。"""
-    win = tk.Toplevel(parent)
-    win.title("タグ編集")
-    win.attributes("-topmost", True)
-    win.geometry("380x260")
-
-    tk.Label(win, text="対象画像:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
-    target_var = tk.StringVar(value="未選択")
-    tag_edit_window_target_var = target_var
-    tk.Label(win, textvariable=target_var, wraplength=340, justify="left", anchor="w").pack(fill="x", padx=10)
-
-    tk.Label(win, text="タグ（; 区切り）:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
-    tag_var = tk.StringVar(value="")
-    tag_edit_window_tag_var = tag_var
-    entry = tk.Entry(win, textvariable=tag_var, width=40)
-    entry.pack(fill="x", padx=10)
-    entry.focus_set()
-
-    status_var = tk.StringVar(value="保存は Enter または 下のボタン")
-    tk.Label(win, textvariable=status_var, fg="#555555", anchor="w", font=("MS Gothic", 8)).pack(fill="x", padx=10, pady=(4, 0))
-
-    quick_frame = tk.Frame(win)
-    quick_frame.pack(fill="x", padx=10, pady=(6, 0))
-    tk.Label(quick_frame, text="よく使うタグ:", anchor="w").pack(fill="x")
-    quick_tags = collect_all_tags(GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {})
-    quick_tags = sorted(quick_tags)[:12]
-    quick_inner = tk.Frame(quick_frame)
-    quick_inner.pack(fill="x")
-
-    def append_tag(tag_name):
-        current = (tag_var.get() or "").strip()
-        parts = [p.strip() for p in current.split(";") if p.strip()] if current else []
-        if tag_name not in parts:
-            parts.append(tag_name)
-        tag_var.set("; ".join(parts))
-        entry.focus_set()
-        entry.icursor(len(tag_var.get()))
-
-    for tag_name in quick_tags:
-        tk.Button(quick_inner, text=tag_name, font=("MS Gothic", 8), command=lambda t=tag_name: append_tag(t), padx=6, pady=2).pack(side=tk.LEFT, padx=2, pady=2)
-
-    def save_current_tag():
-        file_path = ACTIVE_TAG_TARGET.get("file_path")
-        if not file_path or not os.path.exists(file_path):
-            status_var.set("対象画像が選択されていません")
-            messagebox.showwarning("タグ編集", "対象画像が選択されていません")
-            return
-        image_hash = ACTIVE_TAG_TARGET.get("image_hash") or calculate_file_hash(file_path)
-        if not image_hash:
-            status_var.set("ハッシュ計算に失敗しました")
-            messagebox.showerror("エラー", "画像ハッシュの計算に失敗しました")
-            return
-
-        value = (tag_var.get() or "").strip()
-        normalized = "; ".join(p.strip() for p in value.split(";") if p.strip()) if value else ""
-        if image_hash not in GazoControl.tag_dict:
-            GazoControl.tag_dict[image_hash] = {"tag": "", "hint": os.path.basename(file_path), "rating": None}
-        GazoControl.tag_dict[image_hash]["tag"] = normalized
-        GazoControl.tag_dict[image_hash]["hint"] = os.path.basename(file_path)
-        save_tags(GazoControl.tag_dict)
-        if hasattr(GazoControl, 'set_image_tag'):
-            try:
-                for open_win in GazoControl.open_windows.values():
-                    if getattr(open_win, '_image_hash', None) == image_hash:
-                        GazoControl.set_image_tag(open_win, image_hash)
-                        break
-            except Exception:
-                pass
-
-        status_var.set(f"保存しました: {normalized or '未設定'}")
-        tag_var.set("")
-        entry.focus_set()
-
-    def clear_current_tag():
-        tag_var.set("")
-        status_var.set("入力をクリアしました")
-        entry.focus_set()
-
-    btn_frame = tk.Frame(win)
-    btn_frame.pack(fill="x", padx=10, pady=10)
-    tk.Button(btn_frame, text="保存 (Enter)", command=save_current_tag).pack(side=tk.LEFT, padx=(0, 6))
-    tk.Button(btn_frame, text="クリア", command=clear_current_tag).pack(side=tk.LEFT)
-
-    win.bind("<Return>", lambda event: save_current_tag())
-    win.bind("<Escape>", lambda event: clear_current_tag())
-
-    return win, target_var, tag_var
-
-
-def create_tag_window(parent):
-    """タグ一覧ウィンドウを作成して、タグごとのファイル一覧を見られるようにする。"""
-    win = tk.Toplevel(parent)
-    win.title("タグ一覧")
-    win.attributes("-topmost", True)
-    win.geometry("280x360")
-
-    mode_frame = tk.Frame(win)
-    mode_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
-    tk.Label(mode_frame, text="検索方式:").pack(side=tk.LEFT)
-    mode_var = tk.StringVar(value=TAG_FILTER_MODE)
-    tk.Radiobutton(mode_frame, text="AND", variable=mode_var, value="and", command=lambda: set_tag_filter_mode(mode_var.get())).pack(side=tk.LEFT)
-    tk.Radiobutton(mode_frame, text="OR", variable=mode_var, value="or", command=lambda: set_tag_filter_mode(mode_var.get())).pack(side=tk.LEFT)
-    tk.Button(mode_frame, text="クリア", command=clear_active_tag_filter).pack(side=tk.RIGHT)
-
-    tk.Label(win, text="タグ一覧", font=("Helvetica", "10", "bold")).pack(pady=(0, 4))
-
-    list_frame = tk.Frame(win)
-    list_frame.pack(expand=True, fill=tk.BOTH, padx=8, pady=8)
-    scrollbar = tk.Scrollbar(list_frame)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    tag_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
-    tag_listbox.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
-    scrollbar.config(command=tag_listbox.yview)
-
-    def refresh_tag_list():
-        tag_listbox.delete(0, tk.END)
-        tags = collect_all_tags(GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {})
-        file_names = [os.path.join(DEFOLDER, name) for name in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, name))]
-        path_to_hash = {}
-        for file_path in file_names:
-            try:
-                path_to_hash[file_path] = calculate_file_hash(file_path)
-            except Exception:
-                continue
-
-        for tag_name in tags:
-            matches = find_files_for_tag(file_names, path_to_hash, GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {}, tag_name)
-            tag_listbox.insert(tk.END, f"{tag_name} ({len(matches)})")
-
-    def on_tag_double_click(event):
-        try:
-            idx = tag_listbox.curselection()
-            if not idx:
-                return
-            selected_text = tag_listbox.get(idx[0])
-            tag_name = selected_text.rsplit(" (", 1)[0]
-
-            global ACTIVE_TAG_FILTER
-            ACTIVE_TAG_FILTER = [tag_name]
-
-            file_names = [name for name in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, name))]
-            refresh_file_listbox_with_tag_filter(file_names)
-
-            messagebox.showinfo("タグ検索", f"タグ '{tag_name}' を適用して一覧を更新しました")
-        except Exception as e:
-            logger.warning(f"タグ詳細表示エラー: {e}")
-
-    tag_listbox.bind("<Double-Button-1>", on_tag_double_click)
-    refresh_tag_list()
-    return win
 
 
 def add_tag_to_selected_file(file_path):
@@ -628,9 +350,8 @@ def create_file_list_window(parent, files, draw_func):
             btn.pack(anchor="w")
 
     def apply_tag_filter():
-        global ACTIVE_TAG_FILTER
         active = [tag for tag, var in tag_var_map.items() if var.get()]
-        ACTIVE_TAG_FILTER = active
+        tag_filter_state.set_active_filter(active)
         full_paths = [os.path.join(DEFOLDER, name) for name in files]
         path_hash_map = {}
         for full_path in full_paths:
@@ -645,7 +366,7 @@ def create_file_list_window(parent, files, draw_func):
             path_hash_map,
             GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {},
             active,
-            mode=TAG_FILTER_MODE,
+            mode=tag_filter_state.mode,
         )
         lb.delete(0, tk.END)
         for full_path in filtered:
@@ -760,8 +481,8 @@ def create_file_list_window(parent, files, draw_func):
             def make_move_func(dest):
                 return lambda: execute_move(full_path, dest)
 
-            for i in range(move_dest_count):
-                dest = move_dest_list[i]
+            for i in range(app_state.move_dest_count):
+                dest = app_state.move_dest_list[i]
                 if dest:
                     move_menu.add_command(label=f"{i+1}: {os.path.basename(dest)}", command=make_move_func(dest))
                 else:
@@ -772,7 +493,7 @@ def create_file_list_window(parent, files, draw_func):
             # 類似画像検索 (Smart Move UI再利用)
             def search_similar():
                 try:
-                    target_dest = move_dest_list[move_reg_idx] if move_dest_list[move_reg_idx] else ""
+                    target_dest = app_state.move_dest_list[app_state.move_reg_idx] if app_state.move_dest_list[app_state.move_reg_idx] else ""
                     # move_callbackはexecute_moveでOK
                     # refresh_callbackはこのウィンドウを更新する関数があればそれを渡すが、
                     # ファイルリストは自動更新されない造りっぽいので、refresh= lambda p: draw_func(None) ?
@@ -818,39 +539,6 @@ ss_ai_threshold = tk.DoubleVar(value=app_state.ss_ai_threshold)
 ss_include_subfolders = tk.BooleanVar(value=app_state.ss_include_subfolders)
 ss_after_id = None
 
-# --- D&Dエリアの構築（複数移動先・循環登録） ---
-move_dest_list = app_state.move_dest_list
-move_reg_idx = app_state.move_reg_idx
-move_dest_count = app_state.move_dest_count
-move_labels = [] # 動的生成したラベルの保持用
-move_text_vars = [] # 動的生成したStringVarの保持用
-
-def update_dd_display():
-    """D&Dエリアの表示内容を最新の状態にするのじゃ。のじゃ。"""
-    # AppState から最新値を取得
-    move_dest_count = app_state.move_dest_count
-    move_reg_idx = app_state.move_reg_idx
-    move_dest_list = app_state.move_dest_list
-    
-    marks = []
-    for i in range(move_dest_count):
-        if i == move_reg_idx:
-            marks.append("◎") # 次の登録先なのじゃ
-        elif move_dest_list[i]:
-            marks.append("●") # 登録済み
-        else:
-            marks.append("○") # 未登録
-    
-    text_reg.set(f"登録[次:{move_reg_idx+1}]: {' '.join(marks)}")
-    
-    # 各移動ラベルのテキストを更新
-    for i in range(move_dest_count):
-        if i < len(move_text_vars):
-            # 要素数が足りない事態に備えて安全にアクセスするのじゃ
-            path = move_dest_list[i] if i < len(move_dest_list) else ""
-            if path: move_text_vars[i].set(f"{i+1}: {os.path.basename(path)}")
-            else: move_text_vars[i].set(f"{i+1}: (未登録)")
-
 def auto_slideshow():
     global ss_after_id
     if ss_mode.get():
@@ -877,14 +565,6 @@ def toggle_ss():
         koRoot.after_cancel(ss_after_id)
     if ss_mode.get():
         auto_slideshow()
-
-def reset_move_destinations():
-    """登録済みの移動先フォルダを全てリセットするのじゃ。のじゃ。"""
-    if not messagebox.askyesno("確認", "全ての登録フォルダ設定をリセットしても良いかの？"):
-        return
-    app_state.reset_move_destinations()
-    update_dd_display()
-    print("[RESET] 全ての移動先をリセットしたのじゃ。")
 
 def on_closing_main():
     try:
@@ -1447,7 +1127,7 @@ tools_menu.add_command(label="AIベクトルを更新・作成", command=run_vec
 count_var = tk.IntVar(value=app_state.move_dest_count)
 def change_move_count():
     if app_state.set_move_dest_count(count_var.get()):
-        rebuild_move_area()
+        move_area.rebuild()
     else:
         messagebox.showerror("エラー", "無効な個数です")
         count_var.set(app_state.move_dest_count)
@@ -1458,7 +1138,7 @@ for c in MOVE_DESTINATION_OPTIONS:
     count_sub.add_radiobutton(label=f"{c}個", variable=count_var, value=c, command=change_move_count)
 
 config_menu.add_separator()
-config_menu.add_command(label="全登録フォルダをリセット", command=reset_move_destinations)
+config_menu.add_command(label="全登録フォルダをリセット", command=lambda: move_area.reset_destinations())
 config_menu.add_separator()
 
 # 画像表示サイズ設定ダイアログ
@@ -1688,7 +1368,7 @@ config_menu.add_separator()
 config_menu.add_command(label="常に最前面(T) ON/OFF", command=lambda: koRoot.attributes("-topmost", not koRoot.attributes("-topmost")))
 
 all_items = os.listdir(DEFOLDER)
-folder_win, folder_listbox = create_folder_list_window(koRoot, GetKoFolder(all_items, DEFOLDER))
+folder_win = FolderListWindow(koRoot, on_move_registered=lambda: move_area.refresh_display())
 file_win, file_listbox = create_file_list_window(koRoot, GetGazoFiles(all_items, DEFOLDER), GazoControl.Drawing)
 
 def on_thumbnail_select(file_path, open_image=False):
@@ -1721,8 +1401,15 @@ def create_thumbnail_window():
 thumbnail_window = create_thumbnail_window()
 # ベクトル表示用ウィンドウ
 vector_window = VectorWindow(koRoot)
-tag_window = create_tag_window(koRoot)
-tag_edit_window, tag_edit_window_target_var, tag_edit_window_tag_var = create_tag_editor_window(koRoot)
+
+def _refresh_file_listbox_from_current_folder():
+    """タグ一覧での絞り込み変更後、ファイル一覧を再描画する。"""
+    if 'file_listbox' in globals():
+        current_files = [n for n in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, n))]
+        refresh_file_listbox_with_tag_filter(current_files)
+
+tag_window = TagListWindow(koRoot, GazoControl, on_filter_applied=_refresh_file_listbox_from_current_folder)
+tag_edit_window = TagEditorWindow(koRoot, GazoControl)
 
 # UI参照をロジックに渡す
 GazoControl.SetUI(folder_win, file_win, vector_window)
@@ -1766,31 +1453,6 @@ koRoot.protocol("WM_DELETE_WINDOW", on_closing_main)
 
 refresh_ui(DEFOLDER)
 
-# --- D&Dエリアの構築（2段構え） ---
-text_reg = tk.StringVar(koRoot)
-lbl_reg = tk.Label(koRoot, textvariable=text_reg, bg=COLOR_REGISTER_BG, height=2, bd=2, relief="groove")
-lbl_reg.drop_target_register(DND_FILES)
-
-def handle_drop_register(event):
-    data = event.data
-    if data.startswith('{') and data.endswith('}'): data = data[1:-1]
-    path = os.path.normpath(data)
-    
-    if os.path.isdir(path):
-        app_state.set_move_destination(app_state.move_reg_idx, path)
-        app_state.rotate_move_reg_idx()
-        update_dd_display()
-        logger.info(f"[REGISTER] スロット{app_state.move_reg_idx}に登録: {path}")
-    else:
-        messagebox.showwarning("注意", "ここはフォルダ登録用なのじゃ！ファイルを動かしたいなら下へ入れるのじゃ。")
-
-lbl_reg.dnd_bind("<<Drop>>", handle_drop_register)
-lbl_reg.pack(fill=tk.BOTH, padx=5, pady=(5, 15)) # 15ピクセルの余白をあけるのじゃ
-
-# 移動エリアを保持するフレーム
-move_frame = tk.Frame(koRoot)
-move_frame.pack(fill=tk.BOTH, padx=5, pady=(0, 5), expand=True)
-
 def execute_move(file_path, dest_folder, refresh=True):
     if not dest_folder or not os.path.exists(dest_folder):
         logger.error(f"移動先フォルダが無効: {dest_folder}")
@@ -1812,74 +1474,13 @@ def execute_move(file_path, dest_folder, refresh=True):
         logger.error(f"ファイル移動エラー: {file_path} -> {dest_folder}", exc_info=True)
         messagebox.showerror("失敗", f"移動中にエラーが起きたのじゃ: {e}")
 
+# --- D&Dエリアの構築（2段構え） ---
+move_area = MoveDestinationArea(koRoot, move_callback=execute_move, refresh_callback=lambda: refresh_ui(DEFOLDER))
+move_area.pack(fill=tk.BOTH, padx=0, pady=0, expand=True)
+
 # 移動処理コールバックをLogic側に登録
 GazoControl.set_move_callback(execute_move)
 GazoControl.set_refresh_callback(refresh_ui)
-
-def rebuild_move_area():
-    """移動先エリアを数に合わせて作り直すのじゃ。のじゃ。
-    
-    config_defaults.py の計算関数を使用してグリッドレイアウトを決定します。
-    """
-    global move_labels, move_text_vars
-    # 既存のラベルを掃除
-    for lbl in move_labels: lbl.destroy()
-    move_labels.clear()
-    move_text_vars.clear()
-
-    move_dest_count = app_state.move_dest_count
-    cols = get_move_grid_columns(move_dest_count)
-
-    for i in range(move_dest_count):
-        tv = tk.StringVar(koRoot)
-        # 背景色を交互に変えて視認性を上げるのじゃ
-        bg_color = COLOR_MOVE_BG_1 if (i % 2 == 0) else COLOR_MOVE_BG_2
-        # 12個の時は少しフォントを小さくするのじゃ
-        f_size = 8 if move_dest_count > 8 else 9
-        
-        l = tk.Label(move_frame, textvariable=tv, bg=bg_color, font=("MS Gothic", f_size), height=2, bd=1, relief="ridge")
-        l.drop_target_register(DND_FILES)
-        
-        # クロージャ問題対策のため、iを引数で固定するのじゃ
-        def make_drop_func(idx):
-            def drop_handler(event):
-                try:
-                    # 複数ファイルのパース処理
-                    files = koRoot.tk.splitlist(event.data)
-                    count = 0
-                    for f in files:
-                        p = os.path.normpath(f)
-                        if os.path.isfile(p):
-                            execute_move(p, app_state.move_dest_list[idx], refresh=False)
-                            count += 1
-                        elif os.path.isdir(p):
-                             messagebox.showwarning("注意", f"フォルダは移動できないのじゃ: {p}")
-                    
-                    if count > 0:
-                        refresh_ui(DEFOLDER)
-                        logger.info(f"[BATCH MOVE] {count}個のファイルを移動して画面を更新")
-                except Exception as e:
-                    logger.error(f"ドロップ処理エラー: {e}", exc_info=True)
-            return drop_handler
-        
-        l.dnd_bind("<<Drop>>", make_drop_func(i))
-        l.grid(row=i // cols, column=i % cols, sticky="nsew", padx=1, pady=1)
-        
-        move_labels.append(l)
-        move_text_vars.append(tv)
-
-    # 全ての列と行が均等に広がるようにするのじゃ
-    for c in range(cols): move_frame.columnconfigure(c, weight=1)
-    for r in range((move_dest_count + cols - 1) // cols): move_frame.rowconfigure(r, weight=1)
-    
-    update_dd_display()
-
-# 初期ビルド
-rebuild_move_area()
-
-# リセットボタン（最下部）
-btn_reset = tk.Button(koRoot, text="全登録フォルダをリセット", bg="#fff0f0", font=("MS Gothic", 8), command=reset_move_destinations)
-btn_reset.pack(fill=tk.X, padx=5, pady=(0, 5))
 
 def on_escape(event):
     if ss_mode.get():

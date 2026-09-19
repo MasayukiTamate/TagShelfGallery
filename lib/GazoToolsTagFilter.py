@@ -1,6 +1,52 @@
 import re
 
 
+class TagFilterState:
+    """タグフィルタ・タグ編集対象の状態を一元管理するシングルトンクラス。
+
+    AppState と同じ __new__ シングルトンパターンを踏襲し、
+    TagEditorWindow / TagListWindow など複数のウィンドウが
+    同じフィルタ状態・編集対象を共有できるようにする。
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+
+        self._initialized = True
+
+        self.active_filter = []
+        self.mode = "and"
+        self.active_target = {"file_path": None, "image_hash": None}
+
+    def set_mode(self, mode):
+        self.mode = mode if mode in ("and", "or") else "and"
+
+    def set_active_filter(self, tags):
+        self.active_filter = list(tags) if tags else []
+
+    def clear_filter(self):
+        self.active_filter = []
+
+    def set_active_target(self, file_path, image_hash=None):
+        self.active_target = {"file_path": file_path, "image_hash": image_hash}
+
+    def clear_active_target(self):
+        self.set_active_target(None)
+
+
+def get_tag_filter_state():
+    return TagFilterState()
+
+
 def parse_tag_text(raw_text):
     """タグ文字列を正規化してリスト化する。"""
     if raw_text is None:

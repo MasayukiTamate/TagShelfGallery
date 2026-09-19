@@ -18,6 +18,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 TEST_DIR = Path(__file__).parent
 TEMP_DIR = None
 
+# pytest用のテストではなく手動検証スクリプトのため収集対象から除外
+# (torch/transformers/qwen_vl_utils が未導入の環境では import エラーで全体の収集が止まる)
+collect_ignore = ["test_qwen_local.py"]
+
 
 @pytest.fixture(scope="session")
 def test_data_dir():

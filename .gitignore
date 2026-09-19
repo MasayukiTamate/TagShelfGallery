@@ -1,1 +1,10 @@
 data/tagdata.csv
+data/ratings.json
+data/vectordata.json
+
+# キャッシュ・ログ・個人設定
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/
+config.json

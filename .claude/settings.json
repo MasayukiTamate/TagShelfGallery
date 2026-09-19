@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(archive/**)",
+      "Edit(archive/**)",
+      "Grep(archive/**)",
+      "Glob(archive/**)"
+    ]
+  }
+}
