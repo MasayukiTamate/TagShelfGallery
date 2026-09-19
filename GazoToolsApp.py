@@ -49,6 +49,7 @@ from lib.config_defaults import (
 from lib.GazoToolsGUI import (
     SplashWindow, SimilarityMoveDialog, VectorWindow, ThumbnailPanelWindow,
     MoveDestinationArea, FolderListWindow, TagEditorWindow, TagListWindow,
+    ShortcutKeyBarWindow,
 )
 
 # --- アプリケーション状態の初期化 ---
@@ -831,6 +832,7 @@ show_info_win = tk.BooleanVar(value=app_state.show_info_window)
 show_vector_win = tk.BooleanVar(value=app_state.vector_display.get("enabled", True))
 show_topmost_win = tk.BooleanVar(value=app_state.topmost)
 show_thumbnail_win = tk.BooleanVar(value=app_state.show_thumbnail_window)
+show_shortcut_bar_win = tk.BooleanVar(value=app_state.show_shortcut_key_bar)
 
 def update_visibility():
     global thumbnail_window
@@ -856,6 +858,13 @@ def update_visibility():
     else:
         thumbnail_window.withdraw()
         app_state.show_thumbnail_window = False
+
+    if show_shortcut_bar_win.get():
+        shortcut_bar_window.show()
+        app_state.show_shortcut_key_bar = True
+    else:
+        shortcut_bar_window.withdraw()
+        app_state.show_shortcut_key_bar = False
 
     if show_rating_win.get():
         app_state.show_rating_window = True
@@ -900,6 +909,7 @@ view_menu.add_checkbutton(label="ファイル一覧を表示", variable=show_fil
 view_menu.add_checkbutton(label="評価ウィンドウを表示", variable=show_rating_win, command=update_visibility)
 view_menu.add_checkbutton(label="情報ウィンドウを表示", variable=show_info_win, command=update_visibility)
 view_menu.add_checkbutton(label="ベクトル情報を表示", variable=show_vector_win, command=update_visibility)
+view_menu.add_checkbutton(label="ショートカットキー一覧を表示", variable=show_shortcut_bar_win, command=update_visibility)
 view_menu.add_checkbutton(label="サムネイルパネルを表示", variable=show_thumbnail_win, command=update_visibility)
 view_menu.add_command(label="新しいサムネイル窓を作成", command=lambda: create_thumbnail_window())
 view_menu.add_separator()
@@ -992,6 +1002,14 @@ def on_auto_vectorize_change(*args):
 
 auto_vectorize.trace_add("write", on_auto_vectorize_change)
 config_menu.add_checkbutton(label="└ 未登録なら自動で計算する", variable=auto_vectorize)
+
+# 連続タグ付けモード
+continuous_tagging = tk.BooleanVar(value=app_state.continuous_tagging_mode)
+def on_continuous_tagging_change(*args):
+    app_state.continuous_tagging_mode = continuous_tagging.get()
+
+continuous_tagging.trace_add("write", on_continuous_tagging_change)
+config_menu.add_checkbutton(label="連続タグ付けモード", variable=continuous_tagging)
 
 
 # 開いているウィンドウのサイズを再調整する関数
@@ -1372,9 +1390,13 @@ folder_win = FolderListWindow(koRoot, on_move_registered=lambda: move_area.refre
 file_win, file_listbox = create_file_list_window(koRoot, GetGazoFiles(all_items, DEFOLDER), GazoControl.Drawing)
 
 def on_thumbnail_select(file_path, open_image=False):
-    """サムネイルクリックで対象画像を表示する。"""
-    if file_path and os.path.exists(file_path):
+    """サムネイルのシングルクリックでタグ編集対象に設定し、ダブルクリックで画像を開く。"""
+    if not file_path or not os.path.exists(file_path):
+        return
+    if open_image:
         GazoControl.Drawing(file_path)
+    else:
+        update_active_tag_target(file_path)
 
 thumbnail_windows = []
 
@@ -1393,6 +1415,7 @@ def create_thumbnail_window():
         select_callback=on_thumbnail_select,
         close_callback=remove_thumbnail_window,
         window_number=len(thumbnail_windows) + 1,
+        gazo_control=GazoControl,
     )
     thumbnail_windows.append(window)
     window.show()
@@ -1403,13 +1426,21 @@ thumbnail_window = create_thumbnail_window()
 vector_window = VectorWindow(koRoot)
 
 def _refresh_file_listbox_from_current_folder():
-    """タグ一覧での絞り込み変更後、ファイル一覧を再描画する。"""
+    """タグ一覧での絞り込み変更後、ファイル一覧・サムネイル窓を再描画する。"""
     if 'file_listbox' in globals():
         current_files = [n for n in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, n))]
         refresh_file_listbox_with_tag_filter(current_files)
+    if 'thumbnail_windows' in globals():
+        for window in list(thumbnail_windows):
+            try:
+                if window.winfo_exists():
+                    window.apply_filters()
+            except tk.TclError:
+                pass
 
 tag_window = TagListWindow(koRoot, GazoControl, on_filter_applied=_refresh_file_listbox_from_current_folder)
 tag_edit_window = TagEditorWindow(koRoot, GazoControl)
+shortcut_bar_window = ShortcutKeyBarWindow(koRoot)
 
 # UI参照をロジックに渡す
 GazoControl.SetUI(folder_win, file_win, vector_window)
@@ -1440,12 +1471,27 @@ if app_state.show_vector_window:
 else:
     vector_window.withdraw()
 
+# ショートカットキー一覧バーの復元
+if SAVED_GEOS.get("shortcut_key_bar"):
+    shortcut_bar_window.geometry(SAVED_GEOS["shortcut_key_bar"])
+
+# タグ関連ウィンドウの位置復元
+if SAVED_GEOS.get("tag_window"):
+    tag_window.geometry(SAVED_GEOS["tag_window"])
+if SAVED_GEOS.get("tag_edit_window"):
+    tag_edit_window.geometry(SAVED_GEOS["tag_edit_window"])
+
 update_visibility()
 
 if app_state.show_thumbnail_window:
     thumbnail_window.show()
 else:
     thumbnail_window.withdraw()
+
+if app_state.show_shortcut_key_bar:
+    shortcut_bar_window.show()
+else:
+    shortcut_bar_window.withdraw()
 
 folder_win.protocol("WM_DELETE_WINDOW", lambda: (show_folder_win.set(False), folder_win.withdraw()))
 file_win.protocol("WM_DELETE_WINDOW", lambda: (show_file_win.set(False), file_win.withdraw()))
@@ -1572,6 +1618,17 @@ def on_closing():
         if vector_window:
              app_state.set_window_geometry("vector_window_geometry", vector_window.geometry())
              app_state.show_vector_window = bool(vector_window.winfo_viewable())
+
+        # ショートカットキー一覧バーの位置と表示状態保存
+        if 'shortcut_bar_window' in globals():
+            app_state.set_window_geometry("shortcut_key_bar", shortcut_bar_window.geometry())
+            app_state.show_shortcut_key_bar = show_shortcut_bar_win.get()
+
+        # タグ関連ウィンドウの位置保存
+        if 'tag_window' in globals():
+            app_state.set_window_geometry("tag_window", tag_window.geometry())
+        if 'tag_edit_window' in globals():
+            app_state.set_window_geometry("tag_edit_window", tag_edit_window.geometry())
 
         cfg = app_state.to_dict()
         save_config(cfg["last_folder"], cfg["geometries"], cfg["settings"])

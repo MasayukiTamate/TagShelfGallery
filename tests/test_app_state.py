@@ -125,6 +125,54 @@ def test_window_count_change():
     
     print("[PASS] Window count change working\n")
 
+def test_shortcut_tags_persistence():
+    """Test shortcut-key tag mapping save/restore"""
+    print("=== Shortcut Tags Persistence Test ===")
+    app_state = get_app_state()
+    app_state.clear()
+
+    assert app_state.shortcut_tags == [""] * 9
+
+    app_state.shortcut_tags[0] = "風景"
+    app_state.shortcut_tags[8] = "人物"
+
+    state_dict = app_state.to_dict()
+    assert state_dict["settings"]["shortcut_tags"][0] == "風景"
+
+    new_state = get_app_state()
+    new_state.clear()
+    new_state.from_dict(state_dict)
+
+    assert new_state.shortcut_tags[0] == "風景"
+    assert new_state.shortcut_tags[8] == "人物"
+    assert len(new_state.shortcut_tags) == 9
+
+    print("  Restoring from a short/legacy list...")
+    new_state.clear()
+    new_state.from_dict({"settings": {"shortcut_tags": ["猫"]}})
+    assert new_state.shortcut_tags == ["猫"] + [""] * 8
+
+    print("[PASS] Shortcut tags persistence working\n")
+
+def test_continuous_tagging_mode_persistence():
+    """Test continuous tagging mode save/restore"""
+    print("=== Continuous Tagging Mode Persistence Test ===")
+    app_state = get_app_state()
+    app_state.clear()
+
+    assert app_state.continuous_tagging_mode == False
+
+    app_state.continuous_tagging_mode = True
+    state_dict = app_state.to_dict()
+    assert state_dict["settings"]["continuous_tagging_mode"] == True
+
+    new_state = get_app_state()
+    new_state.clear()
+    new_state.from_dict(state_dict)
+    assert new_state.continuous_tagging_mode == True
+
+    print("[PASS] Continuous tagging mode persistence working\n")
+
 def main():
     print("=" * 60)
     print("GazoTools UI Improvement - AppState Test")
@@ -136,7 +184,9 @@ def main():
         test_state_persistence()
         test_move_destinations()
         test_window_count_change()
-        
+        test_shortcut_tags_persistence()
+        test_continuous_tagging_mode_persistence()
+
         print("=" * 60)
         print("[SUCCESS] All tests passed!")
         print("=" * 60)

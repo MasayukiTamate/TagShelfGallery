@@ -37,7 +37,12 @@ class AppState:
         self.move_dest_list = [""] * 12
         self.move_reg_idx = 0
         self.move_dest_count = 2
-        
+
+        # タグ付けショートカットキー（数字キー1〜9 -> タグ名）
+        from lib.config_defaults import SHORTCUT_TAG_KEY_COUNT
+        self.shortcut_tags = [""] * SHORTCUT_TAG_KEY_COUNT
+        self.continuous_tagging_mode = False  # 連続タグ付けモード
+
         # UI 表示設定
         self.show_folder_window = True
         self.show_file_window = True
@@ -45,6 +50,7 @@ class AppState:
         self.show_info_window = False      # 情報ウィンドウ表示
         self.show_vector_window = False    # ベクトルウィンドウ表示 (初期値False)
         self.show_thumbnail_window = True  # サムネイルパネル表示
+        self.show_shortcut_key_bar = True  # ショートカットキー一覧バー表示
         self.thumbnail_rows = 3
         self.thumbnail_columns = 4
         self.thumbnail_width = 500
@@ -89,6 +95,9 @@ class AppState:
             "file": None,
             "thumbnail": None,
             "vector_window_geometry": None,
+            "shortcut_key_bar": None,
+            "tag_window": None,
+            "tag_edit_window": None,
         }
         
         # リソース監視設定
@@ -460,6 +469,9 @@ class AppState:
                 "show_vector_window": self.show_vector_window,
                 "show_info_window": self.show_info_window,
                 "show_thumbnail_window": self.show_thumbnail_window,
+                "show_shortcut_key_bar": self.show_shortcut_key_bar,
+                "shortcut_tags": self.shortcut_tags,
+                "continuous_tagging_mode": self.continuous_tagging_mode,
                 "thumbnail_rows": self.thumbnail_rows,
                 "thumbnail_columns": self.thumbnail_columns,
                 "thumbnail_width": self.thumbnail_width,
@@ -510,6 +522,13 @@ class AppState:
                 self.show_vector_window = settings.get("show_vector_window", False)
                 self.show_info_window = settings.get("show_info_window", False)
                 self.show_thumbnail_window = settings.get("show_thumbnail_window", True)
+                self.show_shortcut_key_bar = settings.get("show_shortcut_key_bar", True)
+                self.continuous_tagging_mode = settings.get("continuous_tagging_mode", False)
+                from lib.config_defaults import SHORTCUT_TAG_KEY_COUNT
+                loaded_shortcuts = settings.get("shortcut_tags", [])
+                if len(loaded_shortcuts) < SHORTCUT_TAG_KEY_COUNT:
+                    loaded_shortcuts = (loaded_shortcuts + [""] * SHORTCUT_TAG_KEY_COUNT)[:SHORTCUT_TAG_KEY_COUNT]
+                self.shortcut_tags = loaded_shortcuts[:SHORTCUT_TAG_KEY_COUNT]
                 self.thumbnail_rows = max(1, int(settings.get("thumbnail_rows", 3)))
                 self.thumbnail_columns = max(1, int(settings.get("thumbnail_columns", 4)))
                 saved_width = int(settings.get("thumbnail_width", 500))

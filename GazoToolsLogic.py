@@ -23,6 +23,7 @@ from lib.GazoToolsData import (
 from lib.GazoToolsAI import VectorEngine, VectorBatchProcessor
 from lib.GazoToolsState import get_app_state
 from lib.GazoToolsVectorInterpreter import get_interpreter
+from lib.GazoToolsTagFilter import parse_tag_text
 
 # ロギング設定 (循環参照回避のためここで行わない場合もあるが、Loggerは一般的に安全)
 from lib.GazoToolsLogger import LoggerManager, record_error
@@ -1395,6 +1396,34 @@ class GazoPicture():
                 except Exception:
                     pass
             win.bind("<FocusIn>", on_focus_set)
+
+            def make_shortcut_toggle_handler(slot_index):
+                def handler(event=None):
+                    if slot_index >= len(app_state.shortcut_tags):
+                        return
+                    tag_name = app_state.shortcut_tags[slot_index].strip()
+                    if not tag_name:
+                        return
+                    image_hash = getattr(win, '_image_hash', None)
+                    if not image_hash:
+                        return
+                    entry = self.tag_dict.get(image_hash)
+                    if entry is None:
+                        entry = {"tag": "", "hint": os.path.basename(fullName), "rating": None}
+                        self.tag_dict[image_hash] = entry
+                    current_tags = parse_tag_text(entry.get("tag", ""))
+                    if tag_name in current_tags:
+                        current_tags.remove(tag_name)
+                    else:
+                        current_tags.append(tag_name)
+                    entry["tag"] = "; ".join(current_tags)
+                    entry["hint"] = os.path.basename(fullName)
+                    save_tags(self.tag_dict)
+                    self.set_image_tag(win, image_hash)
+                return handler
+
+            for _i in range(9):
+                win.bind(f"<Key-{_i+1}>", make_shortcut_toggle_handler(_i))
 
             # 表示するUI要素によって高さを動的に調整
             text_area_h = 0

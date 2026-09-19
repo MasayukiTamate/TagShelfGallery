@@ -6,6 +6,7 @@ import os
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
+from tkinter import simpledialog
 from tkinterdnd2 import DND_FILES
 from PIL import Image, ImageTk, ImageOps
 import random
@@ -24,12 +25,14 @@ from lib.GazoToolsTagFilter import (
     collect_all_tags,
     filter_file_names_by_tags,
     find_files_for_tag,
+    parse_tag_text,
 )
 from lib.config_defaults import (
     COLOR_REGISTER_BG,
     COLOR_MOVE_BG_1,
     COLOR_MOVE_BG_2,
     get_move_grid_columns,
+    SHORTCUT_TAG_KEY_COUNT,
 )
 
 # 相対インポートではなく、ルートからのインポートを使用
@@ -41,7 +44,7 @@ import sys
 # 現在の構造上、GazoToolsLogicにある関数(calculate_file_hash, load_vectorsなど)が必要です。
 # GazoToolsLogicがGazoToolsGUIをトップレベルでインポートしていなければ、ここでインポートしても安全です。
 try:
-    from GazoToolsLogic import calculate_file_hash, load_vectors, save_tags
+    from GazoToolsLogic import calculate_file_hash, load_vectors, save_tags, save_config
 except ImportError:
     # パスが通っていない場合（単体テストなど）の対策
     # 本番実行時は GazoToolsApp.py がルートにあるので通るはず
@@ -62,13 +65,19 @@ def calculate_thumbnail_tile_size(canvas_width, canvas_height, rows, columns, ba
 class ThumbnailPanelWindow(tk.Toplevel):
     """画像だけを格子状に並べる、操作可能なサムネイルパネル。"""
 
-    def __init__(self, parent, files=None, select_callback=None, close_callback=None, window_number=1):
+    _TARGET_HIGHLIGHT_COLOR = "#4a90e2"
+
+    def __init__(self, parent, files=None, select_callback=None, close_callback=None, window_number=1, gazo_control=None):
         super().__init__(parent)
         self.title(f"画像サムネイル {window_number}")
         self.attributes("-topmost", bool(app_state.topmost))
         self.select_callback = select_callback
         self.close_callback = close_callback
+        self.gazo_control = gazo_control
+        self.all_files = []
         self.files = []
+        self.selected_paths = set()
+        self.target_path = None
         self._photo_refs = {}
         self._tile_labels = {}
         self._tile_windows = {}
@@ -90,6 +99,7 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self.notebook = notebook
         self.image_tab = image_tab
         self.show_images_var = tk.BooleanVar(value=True)
+        self.untagged_only_var = tk.BooleanVar(value=False)
 
         control = tk.Frame(settings_tab)
         control.pack(fill=tk.X, padx=5, pady=5)
@@ -101,6 +111,14 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self._add_spinbox(control, "横", self.columns_var, 1, 20, 2)
         self._add_spinbox(control, "幅", self.width_var, 32, 2000, 4)
         self._add_spinbox(control, "高さ", self.height_var, 32, 2000, 6)
+        tk.Checkbutton(
+            control, text="タグ未設定のみ表示", variable=self.untagged_only_var,
+            command=self._apply_filters,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", padx=4, pady=(4, 0))
+        tk.Button(
+            control, text="選択した画像にタグを付与",
+            command=self._apply_tag_to_selection,
+        ).grid(row=1, column=4, columnspan=4, sticky="w", padx=4, pady=(4, 0))
 
         self.canvas = tk.Canvas(image_tab, highlightthickness=0, bg="#202020")
         self.scrollbar = tk.Scrollbar(self, orient=tk.VERTICAL, command=self._scroll)
@@ -158,8 +176,82 @@ class ThumbnailPanelWindow(tk.Toplevel):
             self.withdraw()
 
     def set_files(self, files):
-        self.files = list(files)
+        self.all_files = list(files)
+        self._apply_filters()
+
+    def apply_filters(self):
+        """タグ一覧窓側の絞り込み変更時に外部から呼ばれる再フィルタ処理。"""
+        self._apply_filters()
+
+    def _tag_dict(self):
+        return self.gazo_control.tag_dict if self.gazo_control and hasattr(self.gazo_control, 'tag_dict') else {}
+
+    def _build_path_to_hash(self, paths):
+        path_to_hash = {}
+        for path in paths:
+            try:
+                path_to_hash[path] = calculate_file_hash(path)
+            except Exception:
+                continue
+        return path_to_hash
+
+    def _filter_untagged(self, paths):
+        tag_dict = self._tag_dict()
+        path_to_hash = self._build_path_to_hash(paths)
+        result = []
+        for path in paths:
+            image_hash = path_to_hash.get(path)
+            entry = tag_dict.get(image_hash) if image_hash else None
+            if entry is None or not parse_tag_text(entry.get("tag", "")):
+                result.append(path)
+        return result
+
+    def _apply_filters(self):
+        if self.untagged_only_var.get():
+            self.files = self._filter_untagged(self.all_files)
+        elif tag_filter_state.active_filter:
+            path_to_hash = self._build_path_to_hash(self.all_files)
+            self.files = filter_file_names_by_tags(
+                self.all_files, path_to_hash, self._tag_dict(),
+                tag_filter_state.active_filter, tag_filter_state.mode,
+            )
+        else:
+            self.files = list(self.all_files)
         self.render()
+
+    def _apply_tag_to_selection(self):
+        if not self.selected_paths:
+            messagebox.showinfo("タグ付与", "画像が選択されていません")
+            return
+        raw = simpledialog.askstring("タグ付与", "追加するタグ（; 区切り）:", parent=self)
+        if raw is None:
+            return
+        new_tags = set(parse_tag_text(raw))
+        if not new_tags:
+            return
+        tag_dict = self._tag_dict()
+        affected_hashes = []
+        for path in self.selected_paths:
+            try:
+                image_hash = calculate_file_hash(path)
+            except Exception:
+                continue
+            entry = tag_dict.get(image_hash)
+            if entry is None:
+                entry = {"tag": "", "hint": os.path.basename(path), "rating": None}
+                tag_dict[image_hash] = entry
+            existing = set(parse_tag_text(entry.get("tag", "")))
+            entry["tag"] = "; ".join(sorted(existing | new_tags))
+            entry["hint"] = os.path.basename(path)
+            affected_hashes.append(image_hash)
+        if affected_hashes:
+            save_tags(tag_dict)
+            if self.gazo_control and hasattr(self.gazo_control, 'set_image_tag'):
+                for open_win in self.gazo_control.open_windows.values():
+                    if getattr(open_win, '_image_hash', None) in affected_hashes:
+                        self.gazo_control.set_image_tag(open_win, open_win._image_hash)
+        self.selected_paths.clear()
+        self._apply_filters()
 
     def _on_canvas_resize(self, event):
         self._schedule_visible_render()
@@ -240,7 +332,23 @@ class ThumbnailPanelWindow(tk.Toplevel):
                 anchor="nw",
             )
             tile.grid_propagate(False)
-            label = tk.Label(tile, bg="#303030", bd=0, highlightthickness=0)
+            select_var = tk.BooleanVar(value=file_path in self.selected_paths)
+            def on_toggle(path=file_path, var=select_var):
+                if var.get():
+                    self.selected_paths.add(path)
+                else:
+                    self.selected_paths.discard(path)
+            chk = tk.Checkbutton(
+                tile, variable=select_var, bg="#303030",
+                activebackground="#303030", bd=0, highlightthickness=0,
+                command=on_toggle,
+            )
+            chk.place(x=2, y=2)
+            is_target = (file_path == self.target_path)
+            label = tk.Label(
+                tile, bg="#303030", bd=0, highlightthickness=3,
+                highlightbackground=self._TARGET_HIGHLIGHT_COLOR if is_target else "#303030",
+            )
             label.pack(fill=tk.BOTH, expand=True)
             label.bind("<Button-1>", lambda event, path=file_path: self._select(path))
             label.bind("<Double-Button-1>", lambda event, path=file_path: self._select(path, open_image=True))
@@ -258,8 +366,19 @@ class ThumbnailPanelWindow(tk.Toplevel):
                 continue
 
     def _select(self, file_path, open_image=False):
+        self.set_target_path(file_path)
         if self.select_callback:
             self.select_callback(file_path, open_image)
+
+    def set_target_path(self, path):
+        """タグ編集対象になった画像を記録し、該当タイルをハイライトする。"""
+        self.target_path = path
+        for label, file_path in self._tile_labels.values():
+            try:
+                is_target = (file_path == self.target_path)
+                label.config(highlightbackground=self._TARGET_HIGHLIGHT_COLOR if is_target else "#303030")
+            except tk.TclError:
+                continue
 
     def _show_context_menu(self, event, file_path):
         menu = tk.Menu(self, tearoff=0)
@@ -1085,6 +1204,46 @@ class TagEditorWindow(tk.Toplevel):
         self.tag_var.set("")
         self.entry.focus_set()
 
+        if app_state.continuous_tagging_mode:
+            next_path = self._find_next_untagged_image(file_path)
+            if next_path:
+                self.gazo_control.Drawing(next_path)
+                self.status_var.set(f"次の未タグ画像: {os.path.basename(next_path)}")
+                self.entry.focus_set()
+            else:
+                self.status_var.set("未タグの画像はもうありません")
+
+    def _find_next_untagged_image(self, current_file_path):
+        """現在フォルダ内で、指定ファイルより後(1周分)にある未タグ画像のパスを返す。"""
+        current_folder = app_state.current_folder
+        try:
+            names = sorted(GetGazoFiles(os.listdir(current_folder), current_folder))
+        except Exception:
+            return None
+        full_paths = [os.path.join(current_folder, name) for name in names]
+        if not full_paths:
+            return None
+
+        normalized_current = os.path.normcase(os.path.abspath(current_file_path))
+        try:
+            current_index = [os.path.normcase(os.path.abspath(p)) for p in full_paths].index(normalized_current)
+        except ValueError:
+            current_index = -1
+
+        tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
+        ordered = full_paths[current_index + 1:] + full_paths[:current_index + 1]
+        for path in ordered:
+            if path == current_file_path:
+                continue
+            try:
+                image_hash = calculate_file_hash(path)
+            except Exception:
+                continue
+            entry = tag_dict.get(image_hash)
+            if entry is None or not parse_tag_text(entry.get("tag", "")):
+                return path
+        return None
+
     def _clear_current_tag(self):
         self.tag_var.set("")
         self.status_var.set("入力をクリアしました")
@@ -1169,3 +1328,52 @@ class TagListWindow(tk.Toplevel):
             messagebox.showinfo("タグ検索", f"タグ '{tag_name}' を適用して一覧を更新しました")
         except Exception as e:
             logger.warning(f"タグ詳細表示エラー: {e}")
+
+
+class ShortcutKeyBarWindow(tk.Toplevel):
+    """常時表示するショートカットキー一覧バー（画面下部ドッキング）。"""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("ショートカットキー")
+        self.attributes("-topmost", True)
+        self.protocol("WM_DELETE_WINDOW", self.withdraw)
+
+        self.slot_buttons = []
+        bar = tk.Frame(self, bg="#202020")
+        bar.pack(fill=tk.BOTH, expand=True)
+        for i in range(SHORTCUT_TAG_KEY_COUNT):
+            btn = tk.Button(bar, font=("MS Gothic", 9), command=lambda idx=i: self._edit_slot(idx))
+            btn.grid(row=0, column=i, sticky="nsew", padx=1, pady=1)
+            bar.columnconfigure(i, weight=1)
+            self.slot_buttons.append(btn)
+
+        ws = self.winfo_screenwidth()
+        hs = self.winfo_screenheight()
+        w, h = int(ws * 0.9), 60
+        x = (ws - w) // 2
+        y = hs - h - 60
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        self._refresh_labels()
+
+    def _edit_slot(self, idx):
+        current = app_state.shortcut_tags[idx]
+        result = simpledialog.askstring(
+            "ショートカット設定", f"キー {idx + 1} に割り当てるタグ名:",
+            initialvalue=current, parent=self,
+        )
+        if result is None:
+            return
+        app_state.shortcut_tags[idx] = result.strip()
+        cfg = app_state.to_dict()
+        save_config(cfg["last_folder"], cfg["geometries"], cfg["settings"])
+        self._refresh_labels()
+
+    def _refresh_labels(self):
+        for i, btn in enumerate(self.slot_buttons):
+            tag = app_state.shortcut_tags[i]
+            btn.config(text=f"{i + 1}: {tag or '(未設定)'}")
+
+    def show(self):
+        self.deiconify()
+        self.lift()

@@ -42,6 +42,8 @@ MOVE_DESTINATION_OPTIONS = [2, 4, 6, 8, 10, 12]  # 選択可能な個数
 MOVE_GRID_COLUMNS_MULTI = 3   # 4個以上の時の列数
 MOVE_GRID_COLUMNS_SINGLE = 2  # 2-3個の時の列数
 
+SHORTCUT_TAG_KEY_COUNT = 9    # タグ割り当てショートカットキー数（1〜9キー）
+
 
 # ===========================
 # 3. スクリーンセーバー設定

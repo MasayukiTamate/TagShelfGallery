@@ -326,7 +326,11 @@ def test_focus_event_uses_main_module_without_reimport(tmp_path, monkeypatch):
             pass
 
         def bind(self, event, callback):
-            self.bind_hook = callback
+            # 実際のTkは イベント種別ごとに個別のバインドを保持するため、
+            # <FocusIn> のハンドラだけを bind_hook に記録する（他の数字キー等の
+            # バインドで上書きされないようにするため）。
+            if event == "<FocusIn>":
+                self.bind_hook = callback
 
         def attributes(self, *args, **kwargs):
             self.attributes_calls.append(kwargs)
