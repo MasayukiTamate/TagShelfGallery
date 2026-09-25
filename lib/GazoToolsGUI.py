@@ -123,6 +123,16 @@ class ThumbnailPanelWindow(tk.Toplevel):
             command=self._apply_tag_to_selection,
         ).grid(row=1, column=4, columnspan=4, sticky="w", padx=4, pady=(4, 0))
 
+        # --- フォルダ名をタグにする ---
+        tk.Button(
+            control, text="選択にフォルダ名タグ",
+            command=self._apply_folder_tag_to_selection,
+        ).grid(row=4, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 0))
+        tk.Button(
+            control, text="フォルダ内すべてにフォルダ名タグ",
+            command=self._apply_folder_tag_to_folder,
+        ).grid(row=4, column=4, columnspan=5, sticky="w", padx=4, pady=(8, 0))
+
         # --- NOT フィルタ（除外タグ） ---
         tk.Label(control, text="除外タグ (NOT, ; 区切り):").grid(
             row=2, column=0, columnspan=3, sticky="w", padx=4, pady=(8, 0))
@@ -338,6 +348,53 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self.selected_paths.clear()
         self._apply_filters()
 
+    def _apply_folder_tag(self, paths, description):
+        """指定した画像に、入っているフォルダ名をタグとして足す。"""
+        if not self.gazo_control or not hasattr(self.gazo_control, 'apply_folder_tag'):
+            messagebox.showerror("フォルダ名タグ", "タグを保存できる状態ではありません")
+            return
+        if not paths:
+            messagebox.showinfo("フォルダ名タグ", "対象の画像がありません")
+            return
+
+        tagged, folder_names = self.gazo_control.apply_folder_tag(paths)
+        if tagged:
+            label = " / ".join(folder_names)
+            messagebox.showinfo(
+                "フォルダ名タグ",
+                f"{description} {tagged}件にタグを付けました\n付けたタグ: {label}",
+            )
+            for open_win in list(getattr(self.gazo_control, 'open_windows', {}).values()):
+                image_hash = getattr(open_win, '_image_hash', None)
+                if image_hash:
+                    try:
+                        self.gazo_control.set_image_tag(open_win, image_hash)
+                    except tk.TclError:
+                        continue
+        else:
+            messagebox.showinfo("フォルダ名タグ", f"{description} 新しく付くタグはありませんでした")
+        self._apply_filters()
+
+    def _apply_folder_tag_to_selection(self):
+        paths = sorted(self.selected_paths)
+        if not paths:
+            messagebox.showinfo("フォルダ名タグ", "画像が選択されていません")
+            return
+        self._apply_folder_tag(paths, "選択した")
+        self.selected_paths.clear()
+
+    def _apply_folder_tag_to_folder(self):
+        paths = list(self.all_files)
+        if not paths:
+            messagebox.showinfo("フォルダ名タグ", "このフォルダに画像がありません")
+            return
+        if not messagebox.askyesno(
+            "フォルダ名タグ",
+            f"このフォルダの画像 {len(paths)}件すべてに、フォルダ名をタグとして付けます。\nよろしいですか？",
+        ):
+            return
+        self._apply_folder_tag(paths, "フォルダ内の")
+
     def _on_canvas_resize(self, event):
         self._schedule_visible_render()
 
@@ -478,6 +535,7 @@ class ThumbnailPanelWindow(tk.Toplevel):
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="画像を開く", command=lambda: self._select(file_path, open_image=True))
         menu.add_command(label="タグ編集", command=lambda: self._edit_tag(file_path))
+        menu.add_command(label="フォルダ名をタグに追加", command=lambda: self._apply_folder_tag([file_path], "この画像"))
         menu.add_command(label="パスをコピー", command=lambda: self._copy_path(file_path))
         menu.add_separator()
         menu.add_command(label="このサムネイル窓を隠す", command=self.withdraw)
@@ -1094,9 +1152,11 @@ class MoveDestinationArea(tk.Frame):
 class FolderListWindow(tk.Toplevel):
     """フォルダ一覧ウィンドウ。移動先フォルダの登録・フォルダ間移動を担当する。"""
 
-    def __init__(self, parent, on_move_registered=None):
+    def __init__(self, parent, on_move_registered=None, on_tag_folder=None):
         super().__init__(parent)
         self.on_move_registered = on_move_registered
+        # フォルダ名をタグとして一括付与するコールバック (folder_path を受ける)
+        self.on_tag_folder = on_tag_folder
         self.title("子データ窓 - フォルダ一覧")
         self.attributes("-topmost", True)
 
@@ -1166,6 +1226,13 @@ class FolderListWindow(tk.Toplevel):
                     self.on_move_registered()
 
             popup.add_command(label="登録を挿入", font=("MS Gothic", 9, "bold"), command=insert_reg)
+
+            if self.on_tag_folder:
+                folder_label = os.path.basename(target_path) or target_path
+                popup.add_command(
+                    label=f"中の画像に「{folder_label}」をタグ付け",
+                    command=lambda p=target_path: self.on_tag_folder(p),
+                )
             popup.add_separator()
 
             def make_reg_func(s_idx, p):

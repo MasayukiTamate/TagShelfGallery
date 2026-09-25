@@ -364,6 +364,44 @@ def add_tag_to_selected_file(file_path):
     messagebox.showinfo("タグ更新", f"タグを保存しました: {tag_text or '未設定'}")
 
 
+def apply_folder_tag_to_paths(paths, description, confirm_count=None):
+    """指定した画像に、入っているフォルダ名をタグとして付ける。
+
+    confirm_count を渡すと、その件数を示して確認してから実行する。
+    """
+    paths = [p for p in paths if p and os.path.isfile(p)]
+    if not paths:
+        messagebox.showinfo("フォルダ名タグ", "対象の画像がありません")
+        return 0
+
+    if confirm_count is not None:
+        if not messagebox.askyesno(
+            "フォルダ名タグ",
+            f"{description} {len(paths)}件に、フォルダ名をタグとして付けます。\nよろしいですか？",
+            parent=koRoot,
+        ):
+            return 0
+
+    tagged, folder_names = GazoControl.apply_folder_tag(paths)
+    if tagged:
+        messagebox.showinfo(
+            "フォルダ名タグ",
+            f"{tagged}件にタグを付けました\n付けたタグ: {' / '.join(folder_names)}",
+            parent=koRoot,
+        )
+        refresh_ui(DEFOLDER)
+    else:
+        messagebox.showinfo("フォルダ名タグ", "新しく付くタグはありませんでした", parent=koRoot)
+    return tagged
+
+
+def tag_folder_from_folder_list(folder_path):
+    """フォルダ一覧窓の右クリックから、そのフォルダの画像に一括でタグ付けする。"""
+    paths = GazoControl.collect_images_in_folder(folder_path)
+    folder_label = os.path.basename(folder_path) or folder_path
+    apply_folder_tag_to_paths(paths, f"「{folder_label}」の画像", confirm_count=len(paths))
+
+
 def create_file_list_window(parent, files, draw_func):
     win = tk.Toplevel(parent)
     win.title("子絵窓 - ファイル一覧")
@@ -515,7 +553,8 @@ def create_file_list_window(parent, files, draw_func):
     frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
     scrollbar = tk.Scrollbar(frame)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    lb = tk.Listbox(frame, yscrollcommand=scrollbar.set)
+    # 複数選択できるようにする（フォルダ名タグの一括付与などで使う）
+    lb = tk.Listbox(frame, yscrollcommand=scrollbar.set, selectmode=tk.EXTENDED)
     for f in files: lb.insert(tk.END, f)
     lb.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
     scrollbar.config(command=lb.yview)
@@ -579,15 +618,29 @@ def create_file_list_window(parent, files, draw_func):
     # 右クリックメニュー
     def on_right_click(event):
         try:
-            # クリック位置を選択状態にする
             idx = lb.nearest(event.y)
-            lb.selection_clear(0, tk.END)
-            lb.selection_set(idx)
+            # すでに複数選んでいる中を右クリックした時は、選択を崩さない
+            if idx not in lb.curselection():
+                lb.selection_clear(0, tk.END)
+                lb.selection_set(idx)
             lb.activate(idx)
             filename = lb.get(idx)
             full_path = os.path.join(DEFOLDER, filename)
+            selected_paths = [os.path.join(DEFOLDER, lb.get(i)) for i in lb.curselection()]
 
             popup = tk.Menu(win, tearoff=0)
+
+            # フォルダ名をタグとして付ける
+            folder_label = os.path.basename(DEFOLDER) or DEFOLDER
+            popup.add_command(
+                label=f"選択した{len(selected_paths)}件に「{folder_label}」をタグ付け",
+                command=lambda: apply_folder_tag_to_paths(selected_paths, "選択した"),
+            )
+            popup.add_command(
+                label=f"フォルダ内すべてに「{folder_label}」をタグ付け",
+                command=lambda: tag_folder_from_folder_list(DEFOLDER),
+            )
+            popup.add_separator()
 
             # 名前変更
             def rename_file():
@@ -1524,7 +1577,11 @@ config_menu.add_separator()
 config_menu.add_command(label="常に最前面(T) ON/OFF", command=lambda: koRoot.attributes("-topmost", not koRoot.attributes("-topmost")))
 
 all_items = os.listdir(DEFOLDER)
-folder_win = FolderListWindow(koRoot, on_move_registered=lambda: move_area.refresh_display())
+folder_win = FolderListWindow(
+    koRoot,
+    on_move_registered=lambda: move_area.refresh_display(),
+    on_tag_folder=lambda path: tag_folder_from_folder_list(path),
+)
 file_win, file_listbox = create_file_list_window(koRoot, GetGazoFiles(all_items, DEFOLDER), GazoControl.Drawing)
 
 def on_thumbnail_select(file_path, open_image=False):

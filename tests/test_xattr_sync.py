@@ -278,3 +278,63 @@ def test_full_sync_is_stable_when_run_twice(control, image_file):
     changed, _scanned, written = control.import_xattr_tags([image_file], full=True)
 
     assert (changed, written) == (0, 0)
+
+
+# ---------------------------------------------------------------- ":" の書き直し
+
+
+def test_colon_only_file_is_rewritten_with_commas(control, image_file):
+    """タグの顔ぶれが同じでも、":" 区切りのままなら "," に直すこと。"""
+    import os as _os
+    _os.setxattr(image_file, b"user.xdg.tags", "満:ベッド:恥ずかしい".encode("utf-8"))
+    image_hash = _hash_of(image_file)
+    control.tag_dict[image_hash] = {"tag": "満; ベッド; 恥ずかしい", "hint": "", "rating": None}
+
+    changed, _scanned, written = control.import_xattr_tags([image_file])
+
+    assert written == 1
+    raw = _os.getxattr(image_file, b"user.xdg.tags").decode("utf-8")
+    assert raw == "満,ベッド,恥ずかしい"
+
+
+def test_colon_rewrite_happens_without_csv_entry(control, image_file):
+    """CSV に無いファイルでも、Dolphin 側の ":" は "," に直る。"""
+    import os as _os
+    _os.setxattr(image_file, b"user.xdg.tags", "膣内射精:裸:ベッド:愛:大小".encode("utf-8"))
+
+    control.import_xattr_tags([image_file])
+
+    raw = _os.getxattr(image_file, b"user.xdg.tags").decode("utf-8")
+    assert raw == "膣内射精,裸,ベッド,愛,大小"
+
+
+def test_already_comma_form_is_left_untouched(control, image_file):
+    """すでに "," 区切りのファイルは書き直さない（無駄な再インデックスを避ける）。"""
+    import os as _os
+    _os.setxattr(image_file, b"user.xdg.tags", "裸,好き放題,ベッド".encode("utf-8"))
+    image_hash = _hash_of(image_file)
+    control.tag_dict[image_hash] = {"tag": "裸; 好き放題; ベッド", "hint": "", "rating": None}
+
+    _changed, _scanned, written = control.import_xattr_tags([image_file])
+
+    assert written == 0
+
+
+def test_fullwidth_colon_is_rewritten(control, image_file):
+    import os as _os
+    _os.setxattr(image_file, b"user.xdg.tags", "好き：挿入:ベッド".encode("utf-8"))
+
+    control.import_xattr_tags([image_file])
+
+    raw = _os.getxattr(image_file, b"user.xdg.tags").decode("utf-8")
+    assert raw == "好き,挿入,ベッド"
+
+
+def test_colon_rewrite_is_stable_on_second_run(control, image_file):
+    import os as _os
+    _os.setxattr(image_file, b"user.xdg.tags", "満:ベッド".encode("utf-8"))
+
+    control.import_xattr_tags([image_file])
+    _changed, _scanned, written = control.import_xattr_tags([image_file])
+
+    assert written == 0

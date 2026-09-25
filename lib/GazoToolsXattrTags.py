@@ -123,28 +123,46 @@ def baloo_to_stars(value):
     return max(0, min(MAX_STARS, stars))
 
 
-def read_tags(path):
-    """ファイルに付いた Dolphin のタグをリストで返す。無ければ空リスト。"""
+def canonical_value(tags):
+    """write_tags が実際に書き込む文字列を返す。
+
+    保存されている文字列がこの形と違えば、Dolphin から見て区切られていない
+    ということなので、書き直す必要がある。
+    """
+    return DOLPHIN_SEPARATOR.join(normalize_tags(tags))
+
+
+def read_tags_with_raw(path):
+    """タグ一覧と、拡張属性に入っている生の文字列を返す。
+
+    生の文字列は「すでに Dolphin の区切り "," になっているか」を
+    判定するために使う。未設定なら ([], None)。
+    """
     if not _platform_supported or not path:
-        return []
+        return ([], None)
     try:
         raw = os.getxattr(path, XATTR_TAGS)
     except OSError as exc:
         if exc.errno in (errno.ENODATA, errno.ENOENT):
-            return []
+            return ([], None)
         if _is_unsupported_error(exc):
             _mark_unsupported(path, exc)
-            return []
+            return ([], None)
         logger.debug(f"タグ属性の読み込みに失敗: {path} ({exc})")
-        return []
+        return ([], None)
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         logger.debug(f"タグ属性の文字コードが不正: {path}")
-        return []
+        return ([], None)
     # 先に区切ってから正規化する。順番を逆にすると、区切り文字が
     # 置換されてしまい 1 つの長いタグ名になってしまう。
-    return normalize_tags(_READ_SEPARATORS.split(text))
+    return (normalize_tags(_READ_SEPARATORS.split(text)), text)
+
+
+def read_tags(path):
+    """ファイルに付いた Dolphin のタグをリストで返す。無ければ空リスト。"""
+    return read_tags_with_raw(path)[0]
 
 
 def write_tags(path, tags):

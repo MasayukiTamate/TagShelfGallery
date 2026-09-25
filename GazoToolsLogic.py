@@ -296,7 +296,7 @@ class GazoPicture():
             if not path or not os.path.isfile(path):
                 continue
             scanned += 1
-            file_tags = xattr_tags.read_tags(path)
+            file_tags, file_raw = xattr_tags.read_tags_with_raw(path)
             file_stars = xattr_tags.read_rating(path)
             if not full and not file_tags and not file_stars:
                 continue
@@ -329,8 +329,11 @@ class GazoPicture():
                 entry["tag"] = canonical
                 entry["hint"] = os.path.basename(path)
                 entry_changed = True
-            if merged != file_tags:
-                # CSV にしか無かったタグをファイル側へ書き戻す
+            # 書き戻しが要るのは次の2つ。
+            #   1. CSV にしか無いタグがある
+            #   2. 保存の形が Dolphin の区切り "," になっていない
+            #      （":" 区切りのままだと Dolphin は1つの長いタグとして扱う）
+            if merged != file_tags or file_raw != xattr_tags.canonical_value(merged):
                 if xattr_tags.write_tags(path, merged):
                     written += 1
 
@@ -402,6 +405,76 @@ class GazoPicture():
             if self.sync_xattr_for(path, image_hash):
                 written += 1
         return written
+
+    def apply_folder_tag(self, paths):
+        """指定した画像に、それぞれの入っているフォルダ名をタグとして足す。
+
+        タグ名は直近の親フォルダ名だけを使う（階層は付けない）。
+        既に付いているタグはそのまま残し、重複しても増えない。
+        戻り値は (タグを足した件数, 使ったフォルダ名の一覧)。
+        """
+        tagged = 0
+        folder_names = []
+        touched = []
+
+        for path in paths or []:
+            if not path or not os.path.isfile(path):
+                continue
+            folder_name = os.path.basename(os.path.dirname(os.path.abspath(path)))
+            if not folder_name:
+                continue
+            # フォルダ名に区切り文字が入っていると1つのタグにならないため整える
+            folder_name = xattr_tags.normalize_tag(folder_name)
+            if not folder_name:
+                continue
+
+            try:
+                image_hash = calculate_file_hash(path)
+            except Exception:
+                continue
+            self.remember_path_for_hash(path, image_hash)
+
+            entry = self.tag_dict.get(image_hash)
+            if entry is None:
+                entry = {"tag": "", "hint": os.path.basename(path), "rating": None, "assigned_rating": None}
+                self.tag_dict[image_hash] = entry
+
+            current = parse_tag_text(entry.get("tag", ""))
+            if folder_name in current:
+                continue
+
+            current.append(folder_name)
+            entry["tag"] = "; ".join(current)
+            entry["hint"] = os.path.basename(path)
+            tagged += 1
+            touched.append((path, image_hash))
+            if folder_name not in folder_names:
+                folder_names.append(folder_name)
+
+        if tagged:
+            save_tags(self.tag_dict)
+            for path, image_hash in touched:
+                self.sync_xattr_for(path, image_hash)
+            logger.info(f"フォルダ名をタグとして付与しました: {tagged}件 ({', '.join(folder_names)})")
+        return (tagged, folder_names)
+
+    def collect_images_in_folder(self, folder, include_subfolders=False):
+        """フォルダ内の画像パスを集める。タグ一括付与の対象決めに使う。"""
+        if not folder or not os.path.isdir(folder):
+            return []
+        paths = []
+        if include_subfolders:
+            for dirpath, _dirnames, names in os.walk(folder):
+                for name in GetGazoFiles(names, dirpath):
+                    paths.append(os.path.join(dirpath, name))
+        else:
+            try:
+                names = GetGazoFiles(os.listdir(folder), folder)
+            except OSError as exc:
+                logger.warning(f"フォルダを読めません: {folder} ({exc})")
+                return []
+            paths = [os.path.join(folder, name) for name in names]
+        return paths
 
     def reload_tag_data(self):
         """タグ・評価データをディスクから読み直す（F5 の全更新用）。"""
