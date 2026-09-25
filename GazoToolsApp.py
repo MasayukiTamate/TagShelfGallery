@@ -405,7 +405,7 @@ def tag_folder_from_folder_list(folder_path):
 def create_file_list_window(parent, files, draw_func):
     win = tk.Toplevel(parent)
     win.title("子絵窓 - ファイル一覧")
-    win.attributes("-topmost", True)
+    win.attributes("-topmost", bool(app_state.topmost))
     tk.Label(win, text="画像ファイル一覧 (Wクリックで表示)", font=("Helvetica", "9", "bold")).pack(pady=5)
 
     # タグによる絞り込みのための選択状態
@@ -812,13 +812,36 @@ def safe_select_folder():
     for i, w in enumerate(wins): w.attributes("-topmost", prev_states[i])
     return path
 
-def set_all_topmost(enabled):
-    """メイン・サブ・画像ウィンドウ全体の最前面設定をまとめて切り替える。"""
-    wins = [koRoot, folder_win, file_win]
+def collect_persistent_windows():
+    """最前面設定の対象になる常駐窓をすべて集める。
+
+    設定ダイアログのような一時的な窓は含めない（常に前に出したいため）。
+    """
+    wins = [koRoot]
+    for name in ("folder_win", "file_win", "vector_window",
+                 "tag_window", "tag_edit_window", "shortcut_bar_window"):
+        wins.append(globals().get(name))
     if 'thumbnail_windows' in globals():
         wins.extend(thumbnail_windows)
+    wins.append(getattr(GazoControl, '_rating_window', None))
+    wins.append(getattr(GazoControl, '_info_window', None))
     wins.extend(list(GazoControl.open_windows.values()))
-    wins = list(dict.fromkeys([w for w in wins if w and w.winfo_exists()]))
+
+    result = []
+    for window in wins:
+        if window is None or window in result:
+            continue
+        try:
+            if window.winfo_exists():
+                result.append(window)
+        except tk.TclError:
+            continue
+    return result
+
+
+def set_all_topmost(enabled):
+    """メイン・サブ・画像ウィンドウ全体の最前面設定をまとめて切り替える。"""
+    wins = collect_persistent_windows()
     for w in wins:
         try:
             w.attributes("-topmost", bool(enabled))
@@ -1017,73 +1040,158 @@ show_topmost_win = tk.BooleanVar(value=app_state.topmost)
 show_thumbnail_win = tk.BooleanVar(value=app_state.show_thumbnail_window)
 show_shortcut_bar_win = tk.BooleanVar(value=app_state.show_shortcut_key_bar)
 
+# 各窓の前回の表示状態。「今回 表示に切り替わった窓」だけを最前面に出すために使う。
+_visibility_state = {}
+_visibility_initialized = False
+
+
+def _restore_topmost(window):
+    """一時的に上げた最前面設定を、全体の設定に戻す。"""
+    try:
+        if window.winfo_exists():
+            window.attributes("-topmost", bool(app_state.topmost))
+    except tk.TclError:
+        pass
+
+
+def bring_window_to_front(window):
+    """窓を最前面に出す。
+
+    lift() だけでは前に出ないことがあるため、いったん最前面属性を立てて
+    持ち上げ、少し後に全体設定へ戻す。
+    属性の読み戻しはウィンドウマネージャとの往復分だけ遅れて反映されるので、
+    今の値を読んで分岐せず、常に立ててから戻す。
+    """
+    if window is None:
+        return
+    try:
+        if not window.winfo_exists():
+            return
+        window.deiconify()
+        # 表示が実際に反映されてから持ち上げないと、WM の配置に負ける
+        window.update_idletasks()
+        window.lift()
+        window.attributes("-topmost", True)
+        window.after(250, lambda: _restore_topmost(window))
+    except tk.TclError:
+        pass
+
+
+def _apply_visibility(key, visible, show, hide, window=None):
+    """表示/非表示を反映し、非表示から表示に変わった時だけ最前面に出す。
+
+    update_visibility はメニューを1つ触るたびに全窓へ再適用されるため、
+    毎回 lift すると関係ない窓まで前に出てしまう。変化した窓だけを扱う。
+    """
+    became_visible = visible and _visibility_state.get(key) is not True
+    _visibility_state[key] = visible
+    if visible:
+        show()
+        if became_visible and _visibility_initialized:
+            bring_window_to_front(window() if callable(window) else window)
+    else:
+        hide()
+
+
 def update_visibility():
-    global thumbnail_window
+    global thumbnail_window, _visibility_initialized
     if not thumbnail_windows:
         thumbnail_window = create_thumbnail_window()
-    if show_folder_win.get(): 
+
+    def _show_folder():
         folder_win.deiconify()
         app_state.set_show_folder_window(True)
-    else: 
+
+    def _hide_folder():
         folder_win.withdraw()
         app_state.set_show_folder_window(False)
-    
-    if show_file_win.get(): 
+
+    _apply_visibility("folder", show_folder_win.get(), _show_folder, _hide_folder, folder_win)
+
+    def _show_file():
         file_win.deiconify()
         app_state.set_show_file_window(True)
-    else: 
+
+    def _hide_file():
         file_win.withdraw()
         app_state.set_show_file_window(False)
 
-    if show_thumbnail_win.get():
-        thumbnail_window.show()
+    _apply_visibility("file", show_file_win.get(), _show_file, _hide_file, file_win)
+
+    def _show_thumbnail():
+        # show() は lift() を含むので、ここでは出すだけに留める
+        thumbnail_window.deiconify()
         app_state.show_thumbnail_window = True
-    else:
+
+    def _hide_thumbnail():
         thumbnail_window.withdraw()
         app_state.show_thumbnail_window = False
 
-    if show_shortcut_bar_win.get():
-        shortcut_bar_window.show()
+    _apply_visibility("thumbnail", show_thumbnail_win.get(), _show_thumbnail, _hide_thumbnail,
+                      lambda: thumbnail_window)
+
+    def _show_shortcut_bar():
+        shortcut_bar_window.deiconify()
         app_state.show_shortcut_key_bar = True
-    else:
+
+    def _hide_shortcut_bar():
         shortcut_bar_window.withdraw()
         app_state.show_shortcut_key_bar = False
 
-    if show_rating_win.get():
+    _apply_visibility("shortcut_bar", show_shortcut_bar_win.get(),
+                      _show_shortcut_bar, _hide_shortcut_bar, shortcut_bar_window)
+
+    def _show_rating():
         app_state.show_rating_window = True
         if hasattr(GazoControl, '_current_image_hash') and GazoControl._current_image_hash:
             GazoControl.update_rating_window(GazoControl._current_image_hash)
         elif hasattr(GazoControl, '_rating_window') and GazoControl._rating_window:
             GazoControl._rating_window.deiconify()
-    else:
+
+    def _hide_rating():
         app_state.show_rating_window = False
         if hasattr(GazoControl, '_rating_window') and GazoControl._rating_window:
             GazoControl._rating_window.withdraw()
 
-    if show_info_win.get():
+    _apply_visibility("rating", show_rating_win.get(), _show_rating, _hide_rating,
+                      lambda: getattr(GazoControl, '_rating_window', None))
+
+    def _show_info():
         app_state.show_info_window = True
         if hasattr(GazoControl, '_current_image_hash') and GazoControl._current_image_hash:
             current_path = getattr(GazoControl, '_current_image_path', '')
             if current_path and hasattr(GazoControl, 'update_info_window'):
                 GazoControl.update_info_window(current_path, GazoControl._current_image_hash)
-    else:
+
+    def _hide_info():
         app_state.show_info_window = False
         if hasattr(GazoControl, '_info_window') and GazoControl._info_window:
             GazoControl._info_window.withdraw()
 
+    _apply_visibility("info", show_info_win.get(), _show_info, _hide_info,
+                      lambda: getattr(GazoControl, '_info_window', None))
+
     if hasattr(GazoControl, 'vector_win') and GazoControl.vector_win is not None:
-        if show_vector_win.get():
+        def _show_vector():
             app_state.vector_display["enabled"] = True
             try:
                 GazoControl.vector_win.deiconify()
-            except Exception:
+            except tk.TclError:
                 pass
-        else:
+
+        def _hide_vector():
             app_state.vector_display["enabled"] = False
             try:
                 GazoControl.vector_win.withdraw()
-            except Exception:
+            except tk.TclError:
                 pass
+
+        _apply_visibility("vector", show_vector_win.get(), _show_vector, _hide_vector,
+                          lambda: GazoControl.vector_win)
+
+    # 初回（起動時）は状態を記録するだけで、最前面には出さない
+    _visibility_initialized = True
+
 
 view_menu = tk.Menu(menubar, tearoff=0)
 menubar.add_cascade(label="表示(V)", menu=view_menu)

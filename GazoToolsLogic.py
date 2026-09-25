@@ -506,7 +506,7 @@ class GazoPicture():
             # メインウィンドウの子として評価ウィンドウを作成
             rating_win = tk.Toplevel(self.parent)
             rating_win.title("評価")
-            rating_win.attributes("-topmost", True)
+            rating_win.attributes("-topmost", bool(app_state.topmost))
             rating_win.overrideredirect(True)  # タイトルバーなし
             rating_win.attributes("-alpha", 0.9)  # 半透明
 
@@ -1135,7 +1135,7 @@ class GazoPicture():
             # メインウィンドウの子として情報ウィンドウを作成
             info_win = tk.Toplevel(self.parent)
             info_win.title("画像情報")
-            info_win.attributes("-topmost", True)
+            info_win.attributes("-topmost", bool(app_state.topmost))
             info_win.overrideredirect(True)  # タイトルバーなし
             info_win.attributes("-alpha", 0.9)  # 半透明
 

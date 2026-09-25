@@ -1158,7 +1158,7 @@ class FolderListWindow(tk.Toplevel):
         # フォルダ名をタグとして一括付与するコールバック (folder_path を受ける)
         self.on_tag_folder = on_tag_folder
         self.title("子データ窓 - フォルダ一覧")
-        self.attributes("-topmost", True)
+        self.attributes("-topmost", bool(app_state.topmost))
 
         btn_frame = tk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -1277,7 +1277,7 @@ class TagEditorWindow(tk.Toplevel):
         super().__init__(parent)
         self.gazo_control = gazo_control
         self.title("タグ編集")
-        self.attributes("-topmost", True)
+        self.attributes("-topmost", bool(app_state.topmost))
         self.geometry("420x440")
 
         tk.Label(self, text="対象画像:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
@@ -1529,7 +1529,7 @@ class TagListWindow(tk.Toplevel):
         self.gazo_control = gazo_control
         self.on_filter_applied = on_filter_applied
         self.title("タグ一覧")
-        self.attributes("-topmost", True)
+        self.attributes("-topmost", bool(app_state.topmost))
         self.geometry("360x420")
         self._tag_names = []
 
@@ -1705,7 +1705,7 @@ class ShortcutKeyBarWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("ショートカットキー")
-        self.attributes("-topmost", True)
+        self.attributes("-topmost", bool(app_state.topmost))
         self.protocol("WM_DELETE_WINDOW", self.withdraw)
 
         self.slot_buttons = []
