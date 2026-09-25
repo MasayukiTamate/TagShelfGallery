@@ -1101,7 +1101,7 @@ class FolderListWindow(tk.Toplevel):
                     label_text = f"{i+1}: (未登録)"
                 popup.add_command(label=label_text, command=make_reg_func(i, target_path))
 
-            popup.post(event.x_root, event.y_root)
+            popup.tk_popup(event.x_root, event.y_root)
         except Exception as e:
             logger.error(f"右クリックエラー: {e}")
 

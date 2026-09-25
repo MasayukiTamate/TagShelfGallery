@@ -1226,13 +1226,23 @@ class GazoPicture():
             except Exception:
                 position_override = None
 
+        try:
+            topmost_override = bool(win.attributes("-topmost"))
+        except Exception:
+            topmost_override = None
+
         if current_full_name in self.open_windows:
             del self.open_windows[current_full_name]
         win.destroy()
 
-        self.Drawing(next_path, size_override=size_override, position_override=position_override)
+        self.Drawing(
+            next_path,
+            size_override=size_override,
+            position_override=position_override,
+            topmost_override=topmost_override,
+        )
 
-    def Drawing(self, fileName, size_override=None, position_override=None):
+    def Drawing(self, fileName, size_override=None, position_override=None, topmost_override=None):
         if not fileName or not isinstance(fileName, str):
             logger.warning(f"画像表示スキップ: fileName が None/非文字列です ({type(fileName).__name__})")
             return
@@ -1252,7 +1262,13 @@ class GazoPicture():
             fullName = os.path.normcase(os.path.abspath(os.path.join(imageFolder, fileName)))
         
         # 既に開いている場合は一度閉じてから再表示（リフレッシュ）
+        # このとき「前面:ON/OFF」の状態を引き継ぐため、閉じる前に記録しておく。
+        prev_topmost = None
         if fullName in self.open_windows:
+            try:
+                prev_topmost = bool(self.open_windows[fullName].attributes("-topmost"))
+            except Exception:
+                prev_topmost = None
             try:
                 self.open_windows[fullName].destroy()
             except: pass
@@ -1398,7 +1414,13 @@ class GazoPicture():
             else:
                 display_name = "(無効なファイル名)"
             win.title(f"{display_name} ({int(scale*100)}%)")
-            win.attributes("-topmost", True)
+            if topmost_override is not None:
+                effective_topmost = topmost_override
+            elif prev_topmost is not None:
+                effective_topmost = prev_topmost
+            else:
+                effective_topmost = True
+            win.attributes("-topmost", effective_topmost)
 
             # ハッシュ計算とパス保持（後の処理で使用）
             win._image_path = fullName
@@ -1597,7 +1619,7 @@ class GazoPicture():
                 txt = get_label_text(interp_label)
                 if txt:
                     m.add_command(label="表示テキストをコピー", command=lambda: (win.clipboard_clear(), win.clipboard_append(txt)))
-                    m.post(event.x_root, event.y_root)
+                    m.tk_popup(event.x_root, event.y_root)
 
             interp_label.bind("<Button-3>", on_interp_right_click)
             # ベクトル表示が無効の場合、ラベルをpackしない（スペースを取らない）
@@ -1738,7 +1760,7 @@ class GazoPicture():
 
                 menu.add_command(label="類似画像を探す", command=search_similar)
 
-                menu.post(event.x_root, event.y_root)
+                menu.tk_popup(event.x_root, event.y_root)
 
             canvas.bind("<Button-1>", lambda e: start_drag(e, win))
             canvas.bind("<B1-Motion>", lambda e: do_drag(e, win))

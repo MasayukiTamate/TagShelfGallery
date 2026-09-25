@@ -513,7 +513,7 @@ def create_file_list_window(parent, files, draw_func):
             popup.add_command(label="類似画像を探す", command=search_similar)
 
 
-            popup.post(event.x_root, event.y_root)
+            popup.tk_popup(event.x_root, event.y_root)
         except Exception as e:
             print(f"ファイル一覧右クリックエラー: {e}")
 
