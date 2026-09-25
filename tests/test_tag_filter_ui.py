@@ -271,3 +271,106 @@ def test_tag_list_status_line_describes_filters(tag_list):
     assert "含む: 室内" in tag_list.status_var.get()
     tag_list._on_tag_right_click(FakeEvent(y=100))
     assert "除外:" in tag_list.status_var.get()
+
+
+# ---------------------------------------------------------------- タグ編集窓のよく使うタグ
+
+
+@pytest.fixture
+def many_tags():
+    """長いものを含む、数の多いタグ辞書。"""
+    names = [
+        "猫", "犬", "屋外", "室内", "夕焼け", "風景", "人物", "建物", "花", "空",
+        "とても長いタグ名のサンプルです", "H/満", "H/ベッド", "H/恥じらい",
+        "食べ物", "乗り物", "動物", "海", "山", "川", "夜景", "雪", "雨", "朝",
+    ]
+    return {f"hash{i}": {"tag": name, "hint": f"{i}.png", "rating": None}
+            for i, name in enumerate(names)}, names
+
+
+@pytest.fixture
+def editor(root, many_tags):
+    from lib.GazoToolsGUI import TagEditorWindow
+
+    tag_dict, _ = many_tags
+    window = TagEditorWindow(root, FakeControl(tag_dict))
+    window.geometry("420x440")
+    window.update_idletasks()
+    window.update()
+    yield window
+    window.destroy()
+
+
+def test_editor_shows_every_tag(editor, many_tags):
+    """12個で打ち切らず、全タグ分のボタンがあること。"""
+    _, names = many_tags
+    assert sorted(editor._quick_buttons) == sorted(names)
+    assert len(editor._quick_buttons) == len(names)
+
+
+def test_editor_label_reports_count(editor, many_tags):
+    _, names = many_tags
+    assert f"({len(names)}件)" in editor.quick_label_var.get()
+
+
+def test_editor_tags_wrap_into_multiple_rows(editor):
+    """1行に詰め込まず、折り返して複数行になること。"""
+    editor.update_idletasks()
+    rows = {b.winfo_y() for b in editor._quick_buttons.values()}
+    assert len(rows) > 1
+
+
+def test_editor_no_tag_is_clipped_horizontally(editor):
+    """どのタグも、スクロール範囲の右端からはみ出さないこと。"""
+    editor.update_idletasks()
+    region = editor.quick_canvas.cget("scrollregion")
+    assert str(region).strip()
+    right_edge = int(float(str(region).split()[2]))
+    widest = max(b.winfo_x() + b.winfo_reqwidth() for b in editor._quick_buttons.values())
+    assert right_edge >= widest
+
+
+def test_editor_no_tag_is_clipped_vertically(editor):
+    """入りきらない分もスクロール範囲に収まっていること。"""
+    editor.update_idletasks()
+    region = editor.quick_canvas.cget("scrollregion")
+    bottom_edge = int(float(str(region).split()[3]))
+    lowest = max(b.winfo_y() + b.winfo_reqheight() for b in editor._quick_buttons.values())
+    assert bottom_edge >= lowest
+
+
+def test_editor_relayouts_when_window_narrows(editor):
+    """窓を狭めると行が増え、それでも全タグが残ること。"""
+    editor.update_idletasks()
+    before_rows = len({b.winfo_y() for b in editor._quick_buttons.values()})
+
+    editor.geometry("240x440")
+    editor.update()
+    editor.update_idletasks()
+    after_rows = len({b.winfo_y() for b in editor._quick_buttons.values()})
+
+    assert after_rows >= before_rows
+    assert len(editor._quick_buttons) == len(editor.quick_inner.winfo_children())
+
+
+def test_editor_packs_several_tags_per_row(editor):
+    """短いタグは同じ行に詰めて、縦に伸びすぎないこと。"""
+    editor.update_idletasks()
+    rows = {}
+    for button in editor._quick_buttons.values():
+        rows.setdefault(button.winfo_y(), []).append(button)
+    assert max(len(group) for group in rows.values()) > 1
+
+
+def test_editor_quick_tag_click_appends(editor):
+    editor.tag_var.set("")
+    editor._append_tag("猫")
+    editor._append_tag("屋外")
+    assert editor.tag_var.get() == "猫; 屋外"
+
+
+def test_editor_refresh_picks_up_new_tags(editor):
+    editor.gazo_control.tag_dict["新規"] = {"tag": "あとから足したタグ", "hint": "x.png", "rating": None}
+    editor.refresh_quick_tags()
+    editor.update_idletasks()
+    assert "あとから足したタグ" in editor._quick_buttons

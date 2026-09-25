@@ -277,10 +277,20 @@ def refresh_ui(new_path):
 
     refresh_file_listbox_with_tag_filter(files)
 
-    # 取り込んだタグも含めてタグフィルタ欄を作り直す
+    # 取り込んだタグも含めて、タグを並べている窓をすべて作り直す
     if 'file_win' in globals() and hasattr(file_win, 'refresh_tag_panel'):
         try:
             file_win.refresh_tag_panel()
+        except tk.TclError:
+            pass
+    if 'tag_window' in globals():
+        try:
+            tag_window.refresh_tag_list()
+        except tk.TclError:
+            pass
+    if 'tag_edit_window' in globals():
+        try:
+            tag_edit_window.refresh_quick_tags()
         except tk.TclError:
             pass
 
@@ -1782,15 +1792,9 @@ def refresh_everything(event=None):
         # フォルダ走査・各一覧の更新はここでまとめて行われる
         refresh_ui(DEFOLDER)
 
-        # タグ一覧窓・タグ編集窓の中身を作り直す
-        if 'tag_window' in globals():
-            try:
-                tag_window.refresh_tag_list()
-            except tk.TclError:
-                pass
+        # タグ窓の中身は refresh_ui が作り直す。編集対象の表示だけ入れ直す。
         if 'tag_edit_window' in globals():
             try:
-                tag_edit_window.refresh_quick_tags()
                 target = tag_filter_state.active_target.get("file_path")
                 if target and os.path.exists(target):
                     tag_edit_window.set_target(target, tag_filter_state.active_target.get("image_hash"))

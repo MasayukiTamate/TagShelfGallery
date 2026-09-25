@@ -1211,13 +1211,13 @@ class TagEditorWindow(tk.Toplevel):
         self.gazo_control = gazo_control
         self.title("タグ編集")
         self.attributes("-topmost", True)
-        self.geometry("380x260")
+        self.geometry("420x440")
 
         tk.Label(self, text="対象画像:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
         self.target_var = tk.StringVar(value="未選択")
-        tk.Label(self, textvariable=self.target_var, wraplength=340, justify="left", anchor="w").pack(fill="x", padx=10)
+        tk.Label(self, textvariable=self.target_var, wraplength=380, justify="left", anchor="w").pack(fill="x", padx=10)
 
-        tk.Label(self, text="タグ（; 区切り）:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
+        tk.Label(self, text="タグ（; , : 区切り）:", anchor="w").pack(fill="x", padx=10, pady=(8, 2))
         self.tag_var = tk.StringVar(value="")
         self.entry = tk.Entry(self, textvariable=self.tag_var, width=40)
         self.entry.pack(fill="x", padx=10)
@@ -1226,31 +1226,123 @@ class TagEditorWindow(tk.Toplevel):
         self.status_var = tk.StringVar(value="保存は Enter または 下のボタン")
         tk.Label(self, textvariable=self.status_var, fg="#555555", anchor="w", font=("MS Gothic", 8)).pack(fill="x", padx=10, pady=(4, 0))
 
-        quick_frame = tk.Frame(self)
-        quick_frame.pack(fill="x", padx=10, pady=(6, 0))
-        tk.Label(quick_frame, text="よく使うタグ:", anchor="w").pack(fill="x")
-        self.quick_inner = tk.Frame(quick_frame)
-        self.quick_inner.pack(fill="x")
-        self.refresh_quick_tags()
-
+        # ボタンは先に下端へ固定し、残りをタグ一覧に使わせる
         btn_frame = tk.Frame(self)
-        btn_frame.pack(fill="x", padx=10, pady=10)
+        btn_frame.pack(side="bottom", fill="x", padx=10, pady=10)
         tk.Button(btn_frame, text="保存 (Enter)", command=self._save_current_tag).pack(side=tk.LEFT, padx=(0, 6))
         tk.Button(btn_frame, text="クリア", command=self._clear_current_tag).pack(side=tk.LEFT)
+
+        # よく使うタグ。件数が増えても切れないよう、折り返して並べ、
+        # 入りきらない分は縦スクロールで届くようにする。
+        quick_frame = tk.Frame(self)
+        quick_frame.pack(fill="both", expand=True, padx=10, pady=(6, 0))
+        self.quick_label_var = tk.StringVar(value="よく使うタグ:")
+        tk.Label(quick_frame, textvariable=self.quick_label_var, anchor="w").pack(fill="x")
+
+        quick_area = tk.Frame(quick_frame)
+        quick_area.pack(fill="both", expand=True)
+        quick_scroll = tk.Scrollbar(quick_area, orient="vertical")
+        quick_scroll.pack(side="right", fill="y")
+        self.quick_canvas = tk.Canvas(quick_area, highlightthickness=0, yscrollcommand=quick_scroll.set)
+        self.quick_canvas.pack(side="left", fill="both", expand=True)
+        quick_scroll.config(command=self.quick_canvas.yview)
+
+        self.quick_inner = tk.Frame(self.quick_canvas)
+        self._quick_window_id = self.quick_canvas.create_window((0, 0), window=self.quick_inner, anchor="nw")
+        self.quick_inner.bind("<Configure>", self._update_quick_scrollregion)
+        self.quick_canvas.bind("<Configure>", self._on_quick_canvas_resize)
+        for widget in (self.quick_canvas, self.quick_inner):
+            self._bind_quick_wheel(widget)
+
+        self._quick_buttons = {}
+        self.refresh_quick_tags()
 
         self.bind("<Return>", lambda event: self._save_current_tag())
         self.bind("<Escape>", lambda event: self._clear_current_tag())
 
+    def _bind_quick_wheel(self, widget):
+        """ホイールスクロール。X11 は Button-4/5 で飛んでくる。"""
+        widget.bind("<MouseWheel>", self._on_quick_wheel)
+        widget.bind("<Button-4>", self._on_quick_wheel)
+        widget.bind("<Button-5>", self._on_quick_wheel)
+
+    def _on_quick_wheel(self, event):
+        if getattr(event, "num", None) == 4:
+            self.quick_canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            self.quick_canvas.yview_scroll(1, "units")
+        elif event.delta:
+            step = int(-event.delta / 120) or (-1 if event.delta > 0 else 1)
+            self.quick_canvas.yview_scroll(step, "units")
+
+    def _update_quick_scrollregion(self, event=None):
+        self.quick_canvas.configure(scrollregion=self.quick_canvas.bbox("all"))
+
+    def _on_quick_canvas_resize(self, event):
+        self._relayout_quick_tags(event.width)
+
+    def _relayout_quick_tags(self, available_width=None):
+        """使える幅にタグを詰めて並べ直す。
+
+        タグ名の長さはまちまちなので、格子ではなく文章のように
+        左から詰めて、入らなくなったら次の行へ送る。
+        """
+        if not self._quick_buttons:
+            self._update_quick_scrollregion()
+            return
+        if available_width is None:
+            available_width = self.quick_canvas.winfo_width()
+
+        gap = 4
+        width = max(1, int(available_width))
+        x = 0
+        y = 0
+        row_height = 0
+        widest = 0
+        for tag_name in sorted(self._quick_buttons):
+            button = self._quick_buttons[tag_name]
+            button_width = button.winfo_reqwidth()
+            button_height = button.winfo_reqheight()
+            if x > 0 and x + button_width > width:
+                x = 0
+                y += row_height + gap
+                row_height = 0
+            button.place(x=x, y=y)
+            x += button_width + gap
+            row_height = max(row_height, button_height)
+            widest = max(widest, button_width)
+
+        # place を使うと内枠が自動で広がらないので、大きさを自分で決める
+        self.quick_inner.configure(
+            width=max(width, widest),
+            height=y + row_height,
+        )
+        self.quick_inner.update_idletasks()
+        self.quick_canvas.itemconfig(
+            self._quick_window_id,
+            width=max(width, widest),
+        )
+        self._update_quick_scrollregion()
+
     def refresh_quick_tags(self):
-        """「よく使うタグ」のボタンを現在のタグ辞書から作り直す。"""
+        """「よく使うタグ」のボタンを作り直す。件数を絞らず全タグを並べる。"""
         for widget in self.quick_inner.winfo_children():
             widget.destroy()
+        self._quick_buttons = {}
+
         tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
-        for tag_name in sorted(collect_all_tags(tag_dict))[:12]:
-            tk.Button(
+        tag_names = sorted(collect_all_tags(tag_dict))
+        for tag_name in tag_names:
+            button = tk.Button(
                 self.quick_inner, text=tag_name, font=("MS Gothic", 8),
                 command=lambda t=tag_name: self._append_tag(t), padx=6, pady=2,
-            ).pack(side=tk.LEFT, padx=2, pady=2)
+            )
+            self._bind_quick_wheel(button)
+            self._quick_buttons[tag_name] = button
+
+        self.quick_label_var.set(f"よく使うタグ ({len(tag_names)}件):")
+        self.quick_inner.update_idletasks()
+        self._relayout_quick_tags()
 
     def set_target(self, file_path, image_hash=None):
         """フォーカス中の画像をタグ編集対象として設定し、表示を更新する。"""
