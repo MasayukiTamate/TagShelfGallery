@@ -19,6 +19,7 @@
 '''
 import errno
 import os
+import re
 
 from lib.GazoToolsLogger import get_logger
 
@@ -70,13 +71,22 @@ def _is_unsupported_error(exc):
     return isinstance(exc, OSError) and exc.errno in _UNSUPPORTED_ERRNOS
 
 
+# タグ名に含められない文字。GazoTools 側の区切り文字と、
+# Dolphin 側の区切り文字 "," をまとめて置き換える。
+_SEPARATOR_CHARS = ",;:；：、"
+
+# 読み取り時に区切りとみなす文字。Dolphin が書くのは "," だけだが、
+# 1つのタグの中で ":" を区切り代わりに使っている場合も割って取り込む。
+_READ_SEPARATORS = re.compile(r"[,;:；：、]+")
+
+
 def normalize_tag(tag):
     """Dolphin に書ける形にタグ名を整える。区切り文字は含められない。"""
     cleaned = str(tag or "").strip()
     if not cleaned:
         return ""
-    # "," と ";" はどちらの側でも区切り文字なのでタグ名には使えない
-    cleaned = cleaned.replace(",", "／").replace(";", "／")
+    for char in _SEPARATOR_CHARS:
+        cleaned = cleaned.replace(char, "／")
     return cleaned.strip()
 
 
@@ -132,7 +142,9 @@ def read_tags(path):
     except UnicodeDecodeError:
         logger.debug(f"タグ属性の文字コードが不正: {path}")
         return []
-    return normalize_tags(text.split(DOLPHIN_SEPARATOR))
+    # 先に区切ってから正規化する。順番を逆にすると、区切り文字が
+    # 置換されてしまい 1 つの長いタグ名になってしまう。
+    return normalize_tags(_READ_SEPARATORS.split(text))
 
 
 def write_tags(path, tags):

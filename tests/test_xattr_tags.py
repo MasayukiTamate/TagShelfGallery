@@ -164,3 +164,69 @@ def test_filter_state_toggles_are_mutually_exclusive():
         assert state.has_any_filter() is False
     finally:
         state.clear_filter()
+
+
+# ---------------------------------------------------------------- ":" 区切り
+
+
+def test_read_splits_colon_separated_dolphin_tag(tagged_file):
+    """Dolphin側で1つのタグに見えている ":" 区切りを、個別のタグとして読む。"""
+    import os as _os
+    _os.setxattr(tagged_file, b"user.xdg.tags", "事後:イく:大小:キャラクター:精液".encode("utf-8"))
+
+    assert xattr_tags.read_tags(tagged_file) == ["事後", "イく", "大小", "キャラクター", "精液"]
+
+
+def test_read_handles_mixed_comma_and_colon(tagged_file):
+    import os as _os
+    _os.setxattr(tagged_file, b"user.xdg.tags", "H,H/満:恥じらい".encode("utf-8"))
+
+    assert xattr_tags.read_tags(tagged_file) == ["H", "H/満", "恥じらい"]
+
+
+def test_read_splits_fullwidth_colon(tagged_file):
+    import os as _os
+    _os.setxattr(tagged_file, b"user.xdg.tags", "好き：挿入:ベッド".encode("utf-8"))
+
+    assert xattr_tags.read_tags(tagged_file) == ["好き", "挿入", "ベッド"]
+
+
+def test_colon_tags_are_written_back_as_dolphin_commas(tagged_file):
+    """読み込んでそのまま書き戻すと、Dolphinの区切り "," になる。"""
+    import os as _os
+    _os.setxattr(tagged_file, b"user.xdg.tags", "事後:イく:大小".encode("utf-8"))
+
+    xattr_tags.write_tags(tagged_file, xattr_tags.read_tags(tagged_file))
+
+    raw = _os.getxattr(tagged_file, b"user.xdg.tags").decode("utf-8")
+    assert raw == "事後,イく,大小"
+
+
+def test_read_is_stable_after_write_back(tagged_file):
+    import os as _os
+    _os.setxattr(tagged_file, b"user.xdg.tags", "膣内:大小:挿入".encode("utf-8"))
+
+    once = xattr_tags.read_tags(tagged_file)
+    xattr_tags.write_tags(tagged_file, once)
+    twice = xattr_tags.read_tags(tagged_file)
+    assert once == twice
+
+
+def test_normalize_tag_strips_every_separator():
+    assert xattr_tags.normalize_tag("a:b") == "a／b"
+    assert xattr_tags.normalize_tag("a：b") == "a／b"
+    assert xattr_tags.normalize_tag("a、b") == "a／b"
+    # 階層タグの "/" は区切りではないので残る
+    assert xattr_tags.normalize_tag("H/満") == "H/満"
+
+
+def test_parse_tag_text_splits_on_colon():
+    from lib.GazoToolsTagFilter import parse_tag_text
+    assert parse_tag_text("服:下半身脱ぎ:ベッド:恥ずかしい") == ["服", "下半身脱ぎ", "ベッド", "恥ずかしい"]
+    assert parse_tag_text("好き：挿入:ベッド") == ["好き", "挿入", "ベッド"]
+    assert parse_tag_text("a; b, c: d") == ["a", "b", "c", "d"]
+
+
+def test_parse_tag_text_keeps_hierarchy_slash():
+    from lib.GazoToolsTagFilter import parse_tag_text
+    assert parse_tag_text("H; H/満") == ["H", "H/満"]

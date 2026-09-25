@@ -322,8 +322,11 @@ class GazoPicture():
             for tag in file_tags:
                 if tag not in merged:
                     merged.append(tag)
-            if merged != current:
-                entry["tag"] = "; ".join(merged)
+            canonical = "; ".join(merged)
+            # タグが増えた時だけでなく、保存の形が古い時（":" 区切りのまま等）も
+            # 書き直して "; " 区切りにそろえる。
+            if merged != current or entry.get("tag", "") != canonical:
+                entry["tag"] = canonical
                 entry["hint"] = os.path.basename(path)
                 entry_changed = True
             if merged != file_tags:

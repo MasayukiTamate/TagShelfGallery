@@ -1267,7 +1267,7 @@ class TagEditorWindow(tk.Toplevel):
 
     def _append_tag(self, tag_name):
         current = (self.tag_var.get() or "").strip()
-        parts = [p.strip() for p in current.split(";") if p.strip()] if current else []
+        parts = parse_tag_text(current)
         if tag_name not in parts:
             parts.append(tag_name)
         self.tag_var.set("; ".join(parts))
@@ -1287,7 +1287,7 @@ class TagEditorWindow(tk.Toplevel):
             return
 
         value = (self.tag_var.get() or "").strip()
-        normalized = "; ".join(p.strip() for p in value.split(";") if p.strip()) if value else ""
+        normalized = "; ".join(parse_tag_text(value))
         tag_dict = self.gazo_control.tag_dict
         if image_hash not in tag_dict:
             tag_dict[image_hash] = {"tag": "", "hint": os.path.basename(file_path), "rating": None}

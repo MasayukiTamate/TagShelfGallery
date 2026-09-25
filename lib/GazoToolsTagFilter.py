@@ -82,12 +82,18 @@ def get_tag_filter_state():
     return TagFilterState()
 
 
+# タグの区切り文字。全角の「：」「；」「、」も同じ扱いにする。
+# Dolphin の区切りは "," だけなので、ここで割ったタグは
+# 拡張属性へ書き出すとき "," で連結され、Dolphin 側でも個別のタグになる。
+TAG_SEPARATORS = r"[;,:；：、]+"
+
+
 def parse_tag_text(raw_text):
     """タグ文字列を正規化してリスト化する。"""
     if raw_text is None:
         return []
     cleaned = str(raw_text)
-    parts = re.split(r"[;,]+", cleaned)
+    parts = re.split(TAG_SEPARATORS, cleaned)
     tags = []
     for part in parts:
         tag = part.strip()
