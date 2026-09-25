@@ -79,15 +79,45 @@ def save_config(path, geometries=None, settings=None):
         logger.error(f"設定保存中に予期しないエラー: {e}", exc_info=True)
         raise ConfigError(f"Unexpected error saving config: {e}") from e
 
+# ハッシュ計算の結果キャッシュ。
+# キーは絶対パス、値は (mtime_ns, size, hash)。
+# タグ絞り込みやDolphin連携でフォルダ全体のハッシュを何度も引くため、
+# ファイルが変わっていない限り再計算しないようにする。
+_hash_cache = {}
+
+
+def invalidate_hash_cache(filepath=None):
+    """ハッシュキャッシュを破棄する。filepath 指定時はその1件だけ。"""
+    if filepath is None:
+        _hash_cache.clear()
+        return
+    _hash_cache.pop(os.path.abspath(filepath), None)
+
+
 def calculate_file_hash(filepath):
     """ファイルのMD5ハッシュ値を計算するのじゃ。のじゃ。"""
+    cache_key = os.path.abspath(filepath)
+    try:
+        stat_result = os.stat(filepath)
+        stamp = (stat_result.st_mtime_ns, stat_result.st_size)
+    except OSError:
+        stamp = None
+
+    if stamp is not None:
+        cached = _hash_cache.get(cache_key)
+        if cached is not None and cached[0] == stamp[0] and cached[1] == stamp[1]:
+            return cached[2]
+
     hash_md5 = hashlib.md5()
     try:
         with open(filepath, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_md5.update(chunk)
         logger.debug(f"ハッシュ計算完了: {os.path.basename(filepath)}")
-        return hash_md5.hexdigest()
+        digest = hash_md5.hexdigest()
+        if stamp is not None:
+            _hash_cache[cache_key] = (stamp[0], stamp[1], digest)
+        return digest
     except FileNotFoundError as e:
         logger.error(f"ファイルが見つかりません: {filepath}", exc_info=True)
         raise FileHashError(f"File not found: {filepath}") from e

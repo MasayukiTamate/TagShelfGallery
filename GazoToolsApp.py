@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 from GazoToolsLogic import (
     load_config, save_config, HakoData, GazoPicture, calculate_file_hash,
     VectorBatchProcessor, save_ratings, save_tags, calculate_window_layout,
-    build_thumbnail_photo,
+    build_thumbnail_photo, invalidate_hash_cache,
 )
 from lib.GazoToolsBasicLib import tkConvertWinSize, blend_color
 from lib.GazoToolsLib import GetKoFolder, GetGazoFiles
@@ -44,7 +44,7 @@ from lib.config_defaults import (
     MOVE_DESTINATION_SLOTS, MOVE_DESTINATION_MIN,
     MOVE_DESTINATION_OPTIONS, SS_INTERVAL_OPTIONS,
     MIN_AI_THRESHOLD, MAX_AI_THRESHOLD, DEFAULT_AI_THRESHOLD,
-    RATING_SIZE_PRESETS, RATING_POSITION_PRESETS
+    RATING_SIZE_PRESETS, RATING_POSITION_PRESETS, TAG_FILTER_PANEL_HEIGHT
 )
 from lib.GazoToolsGUI import (
     SplashWindow, SimilarityMoveDialog, VectorWindow, ThumbnailPanelWindow,
@@ -74,7 +74,7 @@ def refresh_file_listbox_with_tag_filter(file_names):
         return
 
     file_listbox.delete(0, tk.END)
-    if not tag_filter_state.active_filter:
+    if not tag_filter_state.has_any_filter():
         for name in file_names:
             file_listbox.insert(tk.END, name)
         return
@@ -94,9 +94,22 @@ def refresh_file_listbox_with_tag_filter(file_names):
         GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {},
         tag_filter_state.active_filter,
         mode=tag_filter_state.mode,
+        exclude_tags=tag_filter_state.exclude_filter,
     )
     for full_path in filtered:
         file_listbox.insert(tk.END, os.path.basename(full_path))
+
+
+def refresh_thumbnail_filters():
+    """サムネイル窓にタグ絞り込みの変更を伝えて描き直す。"""
+    if 'thumbnail_windows' not in globals():
+        return
+    for window in list(thumbnail_windows):
+        try:
+            if window.winfo_exists():
+                window.apply_filters()
+        except tk.TclError:
+            continue
 
 
 # --- タイトル（スプラッシュ画面）表示：最優先なのじゃ ---
@@ -244,6 +257,13 @@ def refresh_ui(new_path):
     
     data_manager.SetGazoFiles(files, DEFOLDER, include_subfolders=app_state.ss_include_subfolders)
     GazoControl.SetFolder(DEFOLDER)
+
+    # Dolphin (KDE) 側で付けられたタグ・評価を取り込む。
+    # 拡張属性の読み取りは軽く、ハッシュ計算はタグが付いたファイルだけで済む。
+    try:
+        GazoControl.import_xattr_tags([os.path.join(DEFOLDER, name) for name in files])
+    except Exception as exc:
+        logger.warning(f"Dolphinタグの取り込みに失敗: {exc}")
     
     koRoot.title("画像tools - " + DEFOLDER)
     save_config(DEFOLDER)
@@ -252,6 +272,13 @@ def refresh_ui(new_path):
         folder_win.refresh(folders, files, DEFOLDER)
 
     refresh_file_listbox_with_tag_filter(files)
+
+    # 取り込んだタグも含めてタグフィルタ欄を作り直す
+    if 'file_win' in globals() and hasattr(file_win, 'refresh_tag_panel'):
+        try:
+            file_win.refresh_tag_panel()
+        except tk.TclError:
+            pass
 
     if 'thumbnail_windows' in globals():
         thumbnail_files = [os.path.join(DEFOLDER, name) for name in files]
@@ -316,6 +343,7 @@ def add_tag_to_selected_file(file_path):
     GazoControl.tag_dict[image_hash]["tag"] = tag_text
     GazoControl.tag_dict[image_hash]["hint"] = os.path.basename(file_path)
     save_tags(GazoControl.tag_dict)
+    GazoControl.sync_xattr_for(file_path, image_hash)
     messagebox.showinfo("タグ更新", f"タグを保存しました: {tag_text or '未設定'}")
 
 
@@ -326,58 +354,143 @@ def create_file_list_window(parent, files, draw_func):
     tk.Label(win, text="画像ファイル一覧 (Wクリックで表示)", font=("Helvetica", "9", "bold")).pack(pady=5)
 
     # タグによる絞り込みのための選択状態
-    selected_tags = []
     tag_var_map = {}
+    tag_button_map = {}
 
     tag_frame = tk.Frame(win)
     tag_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
-    tag_label = tk.Label(tag_frame, text="タグフィルタ:")
-    tag_label.pack(anchor="w")
-    tag_canvas = tk.Canvas(tag_frame, height=40, highlightthickness=0)
-    tag_canvas.pack(fill=tk.X)
+    tk.Label(tag_frame, text="タグフィルタ (クリック=含む / 右クリック=除外):", anchor="w").pack(fill=tk.X)
+
+    # タグ数が増えても切れないよう、縦スクロールできる領域にタグを敷き詰める。
+    tag_area = tk.Frame(tag_frame)
+    tag_area.pack(fill=tk.BOTH, expand=False)
+    tag_scroll = tk.Scrollbar(tag_area, orient=tk.VERTICAL)
+    tag_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    tag_hscroll = tk.Scrollbar(tag_area, orient=tk.HORIZONTAL)
+    tag_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
+    tag_canvas = tk.Canvas(tag_area, height=TAG_FILTER_PANEL_HEIGHT, highlightthickness=0,
+                           yscrollcommand=tag_scroll.set, xscrollcommand=tag_hscroll.set)
+    tag_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    tag_scroll.config(command=tag_canvas.yview)
+    tag_hscroll.config(command=tag_canvas.xview)
     tag_inner = tk.Frame(tag_canvas)
-    tag_canvas.create_window((0, 0), window=tag_inner, anchor="nw")
+    tag_inner_id = tag_canvas.create_window((0, 0), window=tag_inner, anchor="nw")
+
+    def _update_tag_scrollregion(event=None):
+        # 中身より内側に切り詰めず、はみ出す分はスクロールで届くようにする
+        tag_canvas.configure(scrollregion=tag_canvas.bbox("all"))
+
+    tag_inner.bind("<Configure>", _update_tag_scrollregion)
+
+    def _on_tag_canvas_resize(event):
+        # 長いタグ名が横に切れないよう、内枠は中身の必要幅を下回らせない
+        tag_canvas.itemconfig(tag_inner_id, width=max(event.width, tag_inner.winfo_reqwidth()))
+        _relayout_tag_buttons(event.width)
+
+    tag_canvas.bind("<Configure>", _on_tag_canvas_resize)
+
+    def _on_tag_wheel(event):
+        # Windows/macOS は event.delta、X11 は Button-4/5 で飛んでくる
+        if getattr(event, "num", None) == 4:
+            tag_canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            tag_canvas.yview_scroll(1, "units")
+        elif event.delta:
+            tag_canvas.yview_scroll(int(-event.delta / 120) or (-1 if event.delta > 0 else 1), "units")
+
+    for widget in (tag_canvas, tag_inner):
+        widget.bind("<MouseWheel>", _on_tag_wheel)
+        widget.bind("<Button-4>", _on_tag_wheel)
+        widget.bind("<Button-5>", _on_tag_wheel)
+
+    def _tag_button_style(tag_name):
+        """含む/除外の状態を色と記号で見せる。"""
+        if tag_name in tag_filter_state.exclude_filter:
+            return ("− " + tag_name, "#b71c1c")
+        if tag_name in tag_filter_state.active_filter:
+            return ("＋ " + tag_name, "#1b5e20")
+        return ("　 " + tag_name, "#000000")
+
+    def _refresh_tag_button_styles():
+        for tag_name, button in tag_button_map.items():
+            text, color = _tag_button_style(tag_name)
+            try:
+                button.config(text=text, fg=color)
+            except tk.TclError:
+                continue
+
+    def _relayout_tag_buttons(available_width=None):
+        """使える幅に応じて、タグを折り返しながら並べ直す。"""
+        if not tag_button_map:
+            return
+        if available_width is None:
+            available_width = tag_canvas.winfo_width()
+        widest = max((b.winfo_reqwidth() for b in tag_button_map.values()), default=120)
+        columns = max(1, int(available_width) // max(1, widest))
+        for index, tag_name in enumerate(sorted(tag_button_map)):
+            button = tag_button_map[tag_name]
+            button.grid(row=index // columns, column=index % columns, sticky="w", padx=2, pady=1)
+        for column in range(columns):
+            tag_inner.grid_columnconfigure(column, weight=0)
+        tag_inner.update_idletasks()
+        tag_canvas.itemconfig(
+            tag_inner_id,
+            width=max(int(available_width), tag_inner.winfo_reqwidth()),
+        )
+        _update_tag_scrollregion()
+
+    def _on_tag_right_click(event, tag_name):
+        """右クリックで除外(NOT)タグを切り替える。"""
+        if tag_filter_state.toggle_exclude_tag(tag_name):
+            # 除外にしたら「含む」側のチェックは外す
+            var = tag_var_map.get(tag_name)
+            if var is not None:
+                var.set(False)
+        apply_tag_filter()
+        return "break"
 
     def rebuild_tag_buttons():
         for widget in tag_inner.winfo_children():
             widget.destroy()
         tag_var_map.clear()
+        tag_button_map.clear()
 
         all_tags = collect_all_tags(GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {})
         for tag_name in all_tags:
-            var = tk.BooleanVar(value=False)
+            var = tk.BooleanVar(value=tag_name in tag_filter_state.active_filter)
             tag_var_map[tag_name] = var
-            btn = tk.Checkbutton(tag_inner, text=tag_name, variable=var, command=apply_tag_filter)
-            btn.pack(anchor="w")
+            text, color = _tag_button_style(tag_name)
+            btn = tk.Checkbutton(
+                tag_inner, text=text, fg=color, variable=var,
+                command=apply_tag_filter, anchor="w",
+            )
+            btn.bind("<Button-3>", lambda event, t=tag_name: _on_tag_right_click(event, t))
+            btn.bind("<MouseWheel>", _on_tag_wheel)
+            btn.bind("<Button-4>", _on_tag_wheel)
+            btn.bind("<Button-5>", _on_tag_wheel)
+            tag_button_map[tag_name] = btn
+        tag_inner.update_idletasks()
+        _relayout_tag_buttons()
+
+    def _current_file_names():
+        """いま開いているフォルダの画像一覧を返す（フォルダ移動に追従させる）。"""
+        try:
+            return GetGazoFiles(os.listdir(DEFOLDER), DEFOLDER)
+        except OSError:
+            return list(files)
 
     def apply_tag_filter():
         active = [tag for tag, var in tag_var_map.items() if var.get()]
         tag_filter_state.set_active_filter(active)
-        full_paths = [os.path.join(DEFOLDER, name) for name in files]
-        path_hash_map = {}
-        for full_path in full_paths:
-            if os.path.exists(full_path):
-                try:
-                    path_hash_map[full_path] = calculate_file_hash(full_path)
-                except Exception:
-                    continue
-
-        filtered = filter_file_names_by_tags(
-            full_paths,
-            path_hash_map,
-            GazoControl.tag_dict if hasattr(GazoControl, 'tag_dict') else {},
-            active,
-            mode=tag_filter_state.mode,
-        )
-        lb.delete(0, tk.END)
-        for full_path in filtered:
-            lb.insert(tk.END, os.path.basename(full_path))
-
-        refresh_file_listbox_with_tag_filter(files)
+        _refresh_tag_button_styles()
+        refresh_file_listbox_with_tag_filter(_current_file_names())
+        refresh_thumbnail_filters()
 
     def refresh_tag_panel():
         rebuild_tag_buttons()
         apply_tag_filter()
+
+    win.refresh_tag_panel = refresh_tag_panel
 
     rebuild_tag_buttons()
 
@@ -1435,6 +1548,8 @@ def create_thumbnail_window():
         gazo_control=GazoControl,
         edit_tag_callback=on_thumbnail_edit_tag,
     )
+    # 後で定義される関数を参照するため、呼び出し時に解決させる
+    window.filter_changed_callback = lambda: _refresh_file_listbox_from_current_folder()
     thumbnail_windows.append(window)
     window.show()
     return window
@@ -1448,13 +1563,13 @@ def _refresh_file_listbox_from_current_folder():
     if 'file_listbox' in globals():
         current_files = [n for n in os.listdir(DEFOLDER) if os.path.isfile(os.path.join(DEFOLDER, n))]
         refresh_file_listbox_with_tag_filter(current_files)
-    if 'thumbnail_windows' in globals():
-        for window in list(thumbnail_windows):
-            try:
-                if window.winfo_exists():
-                    window.apply_filters()
-            except tk.TclError:
-                pass
+    if 'file_win' in globals() and hasattr(file_win, 'refresh_tag_panel'):
+        # 含む/除外の色分けを合わせ直す
+        try:
+            file_win.refresh_tag_panel()
+        except tk.TclError:
+            pass
+    refresh_thumbnail_filters()
 
 tag_window = TagListWindow(koRoot, GazoControl, on_filter_applied=_refresh_file_listbox_from_current_folder)
 tag_edit_window = TagEditorWindow(koRoot, GazoControl)
@@ -1601,7 +1716,71 @@ def on_space(event):
         return
     GazoControl.Drawing(next_image)
 
+
+def refresh_everything(event=None):
+    """F5 で全体を最新の状態にし直す。
+
+    - ハッシュキャッシュを捨てる（外部でファイルが差し替わっていても拾える）
+    - タグ・評価データを CSV / JSON から読み直す
+    - Dolphin (KDE) 側のタグを取り込み直す（和集合）
+    - フォルダ一覧・ファイル一覧・サムネイル窓・タグ窓を描き直す
+    - 開いている画像のタグ表示も更新する
+    """
+    logger.info("F5: 全体を再読み込みします")
+    try:
+        invalidate_hash_cache()
+        GazoControl.reload_tag_data()
+
+        # F5 では全件を突き合わせる。拡張属性が無いファイルも見るので、
+        # 昔 GazoTools だけで付けたタグもここで Dolphin 側へ出る。
+        try:
+            current_paths = [
+                os.path.join(DEFOLDER, name)
+                for name in GetGazoFiles(os.listdir(DEFOLDER), DEFOLDER)
+            ]
+            GazoControl.import_xattr_tags(current_paths, full=True)
+        except OSError as exc:
+            logger.warning(f"F5: フォルダを読めませんでした: {exc}")
+
+        # フォルダ走査・各一覧の更新はここでまとめて行われる
+        refresh_ui(DEFOLDER)
+
+        # タグ一覧窓・タグ編集窓の中身を作り直す
+        if 'tag_window' in globals():
+            try:
+                tag_window.refresh_tag_list()
+            except tk.TclError:
+                pass
+        if 'tag_edit_window' in globals():
+            try:
+                tag_edit_window.refresh_quick_tags()
+                target = tag_filter_state.active_target.get("file_path")
+                if target and os.path.exists(target):
+                    tag_edit_window.set_target(target, tag_filter_state.active_target.get("image_hash"))
+            except tk.TclError:
+                pass
+        if 'shortcut_bar_window' in globals():
+            try:
+                shortcut_bar_window._refresh_labels()
+            except (tk.TclError, AttributeError):
+                pass
+
+        # 開いている画像ウィンドウのタグ表示を更新する
+        for full_name, win in list(GazoControl.open_windows.items()):
+            try:
+                if win.winfo_exists() and getattr(win, "_image_hash", None):
+                    GazoControl.set_image_tag(win, win._image_hash)
+            except tk.TclError:
+                continue
+
+        logger.info("F5: 再読み込みが完了しました")
+    except Exception as exc:
+        logger.error(f"F5 の全更新でエラー: {exc}", exc_info=True)
+        messagebox.showerror("更新エラー", f"全更新中にエラーが起きました:\n{exc}")
+
+
 koRoot.bind("<space>", on_space)
+koRoot.bind_all("<F5>", refresh_everything)
 koRoot.bind("<Escape>", on_escape)
 koRoot.bind_all("<Control-f>", on_ctrl_f)
 koRoot.bind_all("<Control-r>", on_ctrl_r)

@@ -74,7 +74,7 @@
     <h1>GazoTools ユーザーマニュアル (v2.8)</h1>
 
     <div class="highlight">
-        <strong>最新アップデート情報:</strong> マージ競合の解消と内部ロジックの最適化により、安定性が向上しました。
+        <strong>最新アップデート情報:</strong> ファイルマネージャ Dolphin とタグ・評価を共有できるようになりました。あわせて、タグの除外(NOT)絞り込みと F5 の全更新を追加しています。
     </div>
 
     <h2>はじめに</h2>
@@ -93,10 +93,17 @@
     <h3>2. 評価・タグ付け</h3>
     <ul>
         <li><strong>評価 (Rating):</strong> 画像に1〜6の評価（★）を付けることができます。評価はキーボードの数字キー (1-6) でも操作可能です。</li>
-        <li><strong>タグ付け:</strong> 画像を右クリックしてタグを編集できます。</li>
+        <li><strong>タグ付け:</strong> 画像を右クリックしてタグを編集できます。タグは <code>;</code> または <code>,</code> で区切って複数付けられます。</li>
+        <li><strong>タグで絞り込む:</strong>
+            タグ一覧窓で、<strong>ダブルクリック</strong>すると「そのタグを含む画像だけ」、<strong>右クリック</strong>すると「そのタグを持つ画像を隠す」（NOT絞り込み）に切り替わります。含むタグは緑の <code>[+]</code>、除外タグは赤の <code>[-]</code> で表示されます。
+        </li>
+        <li><strong>AND / OR:</strong> 「含む」タグが複数あるときの条件を切り替えます。除外タグはAND・ORどちらでも常に効きます。</li>
+        <li><strong>サムネイル窓での除外:</strong>
+            サムネイル窓の「設定」タブにある「除外タグ (NOT)」欄に <code>;</code> 区切りで入力しても同じ絞り込みができます。「タグ未設定のみ表示」と重ねて使えます。
+        </li>
     </ul>
 
-    <h3>3. スマート移動機能 (Smart Move)</h3>
+    <h3>3. スマート移動機能 (Smart Move)（現在使用できない）</h3>
     <p>AIが画像の類似度を判定し、似ている画像をまとめて移動できる機能です。</p>
     <ul>
         <li><strong>使い方:</strong> 画像リストで右クリック -> 「登録フォルダに移動」 -> 移動先を選択（または新規登録）。</li>
@@ -120,13 +127,33 @@
     <ul>
         <li><strong>スプラッシュスクリーン:</strong> 起動時に気分を盛り上げるタイトル画面を表示します。</li>
         <li><strong>ランダム移動:</strong> スペースキーを押すと、ランダムな画像にジャンプします。</li>
+        <li><strong>全更新 (F5):</strong> フォルダの読み直し、タグ・評価の読み直し、Dolphinとのタグ同期、各ウィンドウの再描画をまとめて行います。外部でファイルやタグを編集した後に押してください。</li>
         <li><strong>自動設定保存:</strong> ウィンドウ位置や最後に開いていたフォルダは自動的に記憶されます。</li>
+    </ul>
+
+    <h3>6. Dolphin (KDE) とのタグ共有</h3>
+    <p>GazoToolsで付けたタグ・評価は、ファイルマネージャ <strong>Dolphin</strong> のタグ・評価とそのまま共有されます。どちらで付けても、もう一方に出てきます。</p>
+    <ul>
+        <li><strong>保存先:</strong> タグはファイルの拡張属性 <code>user.xdg.tags</code> に、評価は <code>user.baloo.rating</code> に書き込まれます。Dolphinが使うのと同じ形式なので、変換作業は要りません。</li>
+        <li><strong>反映のタイミング:</strong>
+            <ul>
+                <li>GazoTools → Dolphin: タグや評価を変えた時点ですぐ書き込まれます。</li>
+                <li>Dolphin → GazoTools: フォルダを開いた時と、<strong>F5</strong> を押した時に取り込まれます。</li>
+            </ul>
+        </li>
+        <li><strong>階層タグ:</strong> Dolphinの <code>H/満</code> のような階層タグは、その名前のままのタグとして扱われます。</li>
+        <li><strong>評価の対応:</strong> GazoToolsの星1〜5が、Dolphinの評価2〜10（星の数の2倍）に対応します。</li>
+        <li><strong>タグを消したいとき:</strong> 両方のタグを足し合わせる方式のため、<strong>Dolphin側で消しても次の同期で戻ってきます</strong>。削除はGazoTools側で行ってください。</li>
+        <li><strong>使えない場所:</strong> NTFSやexFATなど拡張属性に対応しないドライブでは、この共有は自動的に無効になります。GazoTools内のタグは今まで通り使えます。</li>
     </ul>
 
     <h2>困ったときは</h2>
     <ul>
         <li><strong>エラー発生時:</strong> 詳細なエラーログ (<code>errarlog.md</code>) が生成されます。また、画面上の「Copy Error」ボタンで内容をコピーできます。</li>
         <li><strong>動かない場合:</strong> <code>GazoToolsApp.py</code> を再起動してみてください。</li>
+        <li><strong>Dolphinの <code>tags:/</code> にタグが出ない:</strong>
+            KDEのファイル検索(Baloo)が索引していないフォルダの画像は、Dolphinの情報パネルにはタグが出ますが <code>tags:/</code> の一覧には出てきません。KDEシステム設定の「ファイル検索」で、そのフォルダを検索対象に追加してください。
+        </li>
     </ul>
 
     <div class="footer">

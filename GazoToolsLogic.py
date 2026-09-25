@@ -16,7 +16,7 @@ import ctypes
 from ctypes import wintypes
 from lib.GazoToolsLib import GetKoFolder, GetGazoFiles
 from lib.GazoToolsData import (
-    load_config, save_config, calculate_file_hash,
+    load_config, save_config, calculate_file_hash, invalidate_hash_cache,
     load_tags, save_tags, load_ratings, save_ratings,
     load_vectors, save_vectors, HakoData
 )
@@ -24,6 +24,7 @@ from lib.GazoToolsAI import VectorEngine, VectorBatchProcessor
 from lib.GazoToolsState import get_app_state
 from lib.GazoToolsVectorInterpreter import get_interpreter
 from lib.GazoToolsTagFilter import parse_tag_text
+from lib import GazoToolsXattrTags as xattr_tags
 
 # ロギング設定 (循環参照回避のためここで行わない場合もあるが、Loggerは一般的に安全)
 from lib.GazoToolsLogger import LoggerManager, record_error
@@ -165,8 +166,249 @@ class GazoPicture():
         self._move_callback = None
         self._refresh_callback = None
 
-    def set_move_callback(self, callback):
-        """移動処理を実行するコールバックを設定するのじゃ。"""
+        # ハッシュから実ファイルパスを引くための索引。
+        # 評価の保存など、ハッシュしか分からない場面で Dolphin 連携に使う。
+        self._hash_to_path = {}
+
+    # ------------------------------------------------------------------
+    # Dolphin (KDE) タグ連携
+    # ------------------------------------------------------------------
+
+    def _hash_index(self):
+        """ハッシュ→パスの索引を返す。__init__ を通さず生成された場合にも備える。"""
+        index = getattr(self, "_hash_to_path", None)
+        if index is None:
+            index = {}
+            self._hash_to_path = index
+        return index
+
+    def remember_path_for_hash(self, file_path, image_hash):
+        """ハッシュと実ファイルパスの対応を覚えておく。"""
+        if file_path and image_hash:
+            self._hash_index()[image_hash] = file_path
+
+    def resolve_path_for_hash(self, image_hash):
+        """ハッシュから実ファイルパスを引く。見つからなければ None。"""
+        if not image_hash:
+            return None
+
+        index = self._hash_index()
+        path = index.get(image_hash)
+        if path and os.path.exists(path):
+            return path
+
+        # 開いている画像ウィンドウから探す
+        for full_name, win in list(self.open_windows.items()):
+            try:
+                if getattr(win, "_image_hash", None) == image_hash and os.path.exists(full_name):
+                    index[image_hash] = full_name
+                    return full_name
+            except Exception:
+                continue
+
+        # 現在フォルダを走査して探す（最後の手段）
+        folder = app_state.current_folder
+        try:
+            names = GetGazoFiles(os.listdir(folder), folder)
+        except Exception:
+            return None
+        for name in names:
+            candidate = os.path.join(folder, name)
+            try:
+                if calculate_file_hash(candidate) == image_hash:
+                    index[image_hash] = candidate
+                    return candidate
+            except Exception:
+                continue
+        return None
+
+    def get_stars_for_entry(self, entry):
+        """タグ辞書のエントリから Dolphin に書く星数を求める。
+
+        GazoTools の評価は「評価名」で持ち、実際の星数は ratings.json の
+        custom_rating にある。Dolphin の user.baloo.rating はその2倍。
+        """
+        if not isinstance(entry, dict):
+            return None
+        rating_name = entry.get("assigned_rating")
+        if not rating_name:
+            return None
+        rating_data = (self.rating_dict or {}).get(rating_name)
+        if not isinstance(rating_data, dict):
+            return None
+        stars = rating_data.get("custom_rating")
+        if stars is None:
+            stars = rating_data.get("rating")
+        return stars
+
+    def sync_xattr_for(self, file_path, image_hash):
+        """1枚分のタグ・評価を Dolphin 互換の拡張属性へ書き出す。
+
+        CSV 側を正として上書きする。Dolphin 側で増えたタグは
+        フォルダ読み込みや F5 の取り込み(和集合)で先に CSV へ入る。
+        """
+        if not xattr_tags.is_available():
+            return False
+        if not file_path or not image_hash or not os.path.exists(file_path):
+            return False
+
+        self.remember_path_for_hash(file_path, image_hash)
+        entry = (self.tag_dict or {}).get(image_hash)
+        if not isinstance(entry, dict):
+            entry = {}
+
+        ok = xattr_tags.write_tags(file_path, parse_tag_text(entry.get("tag", "")))
+        xattr_tags.write_rating(file_path, self.get_stars_for_entry(entry))
+        return ok
+
+    def sync_xattr_for_hash(self, image_hash):
+        """ハッシュだけ分かっている場面用。パスを解決してから書き出す。"""
+        path = self.resolve_path_for_hash(image_hash)
+        if not path:
+            return False
+        return self.sync_xattr_for(path, image_hash)
+
+    def import_xattr_tags(self, paths, full=False):
+        """Dolphin 側と GazoTools 側のタグ・評価を和集合でそろえる。
+
+        衝突時は和集合。どちらにしかないタグも消えず、最後は両方が同じ
+        顔ぶれになる（Dolphin にしか無かったタグは CSV へ、CSV にしか
+        無かったタグは拡張属性へ書き戻す）。
+        評価は CSV 側に未設定のときだけ Dolphin 側の値を取り込み、
+        CSV 側にあるときは CSV の星数をファイルへ書き出す。
+
+        full=False (フォルダを開いた時):
+            拡張属性が付いたファイルだけを見る。読み取りは軽いので、
+            ハッシュ計算はタグ付きファイルの分だけで済む。
+        full=True (F5):
+            拡張属性が無いファイルも含めて全件を突き合わせる。
+            過去に GazoTools だけで付けたタグもここで Dolphin へ出る。
+
+        戻り値は (CSVの更新件数, 走査件数, ファイルへ書き戻した件数)。
+        """
+        if not xattr_tags.is_available():
+            return (0, 0, 0)
+
+        changed = 0
+        scanned = 0
+        written = 0
+        for path in paths or []:
+            if not path or not os.path.isfile(path):
+                continue
+            scanned += 1
+            file_tags = xattr_tags.read_tags(path)
+            file_stars = xattr_tags.read_rating(path)
+            if not full and not file_tags and not file_stars:
+                continue
+            try:
+                image_hash = calculate_file_hash(path)
+            except Exception:
+                continue
+            self.remember_path_for_hash(path, image_hash)
+
+            entry = self.tag_dict.get(image_hash)
+            if entry is None:
+                if not file_tags and not file_stars:
+                    # 両側とも何も無いファイルは記録しない
+                    continue
+                entry = {"tag": "", "hint": os.path.basename(path), "rating": None, "assigned_rating": None}
+                self.tag_dict[image_hash] = entry
+
+            entry_changed = False
+
+            # --- タグ: 和集合を作り、足りない側それぞれに反映する ---
+            current = parse_tag_text(entry.get("tag", ""))
+            merged = list(current)
+            for tag in file_tags:
+                if tag not in merged:
+                    merged.append(tag)
+            if merged != current:
+                entry["tag"] = "; ".join(merged)
+                entry["hint"] = os.path.basename(path)
+                entry_changed = True
+            if merged != file_tags:
+                # CSV にしか無かったタグをファイル側へ書き戻す
+                if xattr_tags.write_tags(path, merged):
+                    written += 1
+
+            # --- 評価: CSV が空なら取り込み、あれば書き出す ---
+            if file_stars and not entry.get("assigned_rating"):
+                rating_name = f"星{int(file_stars)}"
+                if rating_name not in self.rating_dict:
+                    self.rating_dict[rating_name] = {
+                        "name": rating_name,
+                        "rating": int(file_stars),
+                        "linked": True,
+                        "custom_rating": int(file_stars),
+                    }
+                    save_ratings(self.rating_dict)
+                entry["assigned_rating"] = rating_name
+                self.image_rating_map[image_hash] = rating_name
+                entry_changed = True
+            else:
+                stars = self.get_stars_for_entry(entry)
+                if stars and stars != file_stars:
+                    xattr_tags.write_rating(path, stars)
+
+            if entry_changed:
+                changed += 1
+
+        if changed:
+            save_tags(self.tag_dict)
+        if changed or written:
+            logger.info(
+                f"Dolphinとタグ・評価をそろえました: 取り込み{changed}件 / "
+                f"書き戻し{written}件 / 走査{scanned}件"
+            )
+        return (changed, scanned, written)
+
+    def export_xattr_tags(self, paths):
+        """CSV 側のタグ・評価を、指定ファイル群の拡張属性へ書き出す。"""
+        if not xattr_tags.is_available():
+            return 0
+        written = 0
+        for path in paths or []:
+            if not path or not os.path.isfile(path):
+                continue
+            try:
+                image_hash = calculate_file_hash(path)
+            except Exception:
+                continue
+            if image_hash not in self.tag_dict:
+                continue
+            if self.sync_xattr_for(path, image_hash):
+                written += 1
+        return written
+
+    def sync_xattr_for_rating_name(self, rating_name):
+        """指定した評価名を使っている画像の評価を Dolphin 側へ書き直す。
+
+        評価の星数(custom_rating)を変えると、その評価を付けた画像すべての
+        Dolphin 側の星数が変わるため。パスが既知のものだけを対象にする
+        （フォルダ全走査はしない）。
+        """
+        if not rating_name or not xattr_tags.is_available():
+            return 0
+        written = 0
+        for image_hash, name in list(self.image_rating_map.items()):
+            if name != rating_name:
+                continue
+            path = self._hash_index().get(image_hash)
+            if not path or not os.path.exists(path):
+                continue
+            if self.sync_xattr_for(path, image_hash):
+                written += 1
+        return written
+
+    def reload_tag_data(self):
+        """タグ・評価データをディスクから読み直す（F5 の全更新用）。"""
+        self.tag_dict = load_tags()
+        self.rating_dict = load_ratings()
+        self.image_rating_map = {}
+        for image_hash, data in self.tag_dict.items():
+            if isinstance(data, dict) and data.get("assigned_rating"):
+                self.image_rating_map[image_hash] = data["assigned_rating"]
+
     def set_move_callback(self, callback):
         """移動処理を実行するコールバックを設定するのじゃ。"""
         self._move_callback = callback
@@ -363,6 +605,7 @@ class GazoPicture():
                     if image_hash in self.tag_dict:
                         self.tag_dict[image_hash]["assigned_rating"] = None
                         save_tags(self.tag_dict)
+                        self.sync_xattr_for_hash(image_hash)
 
                     logger.debug(f"画像から評価を解除: {image_hash[:8]}...")
             else:
@@ -393,6 +636,7 @@ class GazoPicture():
                             "assigned_rating": rating_name
                         }
                     save_tags(self.tag_dict)
+                    self.sync_xattr_for_hash(image_hash)
 
                     logger.debug(f"画像に評価適用: {image_hash[:8]}... -> {rating_name}")
         except Exception as e:
@@ -417,6 +661,7 @@ class GazoPicture():
 
                 # 評価変更を即座に保存
                 save_tags(self.tag_dict)
+                self.sync_xattr_for_rating_name(selected_rating)
 
                 # 表示を更新
                 self._update_current_rating_display_from_selected()
@@ -444,6 +689,7 @@ class GazoPicture():
 
                 # 評価変更を即座に保存
                 save_tags(self.tag_dict)
+                self.sync_xattr_for_rating_name(selected_rating)
 
                 # 連動OFFの場合のみ表示を更新
                 if not self._linked_var.get():
@@ -480,6 +726,7 @@ class GazoPicture():
 
                 # 評価変更を即座に保存
                 save_tags(self.tag_dict)
+                self.sync_xattr_for_rating_name(selected_rating)
 
                 # 現在の画像がこの評価を使っている場合は画像にも適用
                 if image_hash and self.image_rating_map.get(image_hash) == selected_rating:
@@ -529,6 +776,7 @@ class GazoPicture():
                         "assigned_rating": rating_name
                     }
                 save_tags(self.tag_dict)
+                self.sync_xattr_for_hash(image_hash)
 
                 logger.debug(f"星クリック直接保存: {image_hash[:8]}... -> {rating_name} ({rating}星)")
             else:
@@ -1141,6 +1389,7 @@ class GazoPicture():
                 self.tag_dict[image_hash]["tag"] = value
                 self.tag_dict[image_hash]["hint"] = os.path.basename(file_path)
                 save_tags(self.tag_dict)
+                self.sync_xattr_for(file_path, image_hash)
                 if update_target_win:
                     self.set_image_tag(update_target_win, image_hash)
                 dialog.destroy()
@@ -1425,6 +1674,8 @@ class GazoPicture():
             # ハッシュ計算とパス保持（後の処理で使用）
             win._image_path = fullName
             win._image_hash = calculate_file_hash(fullName)
+            # 評価保存時などにハッシュから実ファイルを引けるようにしておく
+            self.remember_path_for_hash(fullName, win._image_hash)
             self.open_windows[fullName] = win
             
             def on_img_close():
@@ -1482,6 +1733,7 @@ class GazoPicture():
                     entry["tag"] = "; ".join(current_tags)
                     entry["hint"] = os.path.basename(fullName)
                     save_tags(self.tag_dict)
+                    self.sync_xattr_for(fullName, image_hash)
                     self.set_image_tag(win, image_hash)
                 return handler
 
@@ -1807,6 +2059,7 @@ class GazoPicture():
                 if current_rating is not None:
                     self.tag_dict[image_hash]["rating"] = current_rating
                 save_tags(self.tag_dict)
+                self.sync_xattr_for(filename, image_hash)
                 if update_target_win:
                     self.set_image_tag(update_target_win, image_hash)
         except Exception as e:

@@ -24,6 +24,7 @@ class TagFilterState:
         self._initialized = True
 
         self.active_filter = []
+        self.exclude_filter = []
         self.mode = "and"
         self.active_target = {"file_path": None, "image_hash": None}
 
@@ -33,8 +34,42 @@ class TagFilterState:
     def set_active_filter(self, tags):
         self.active_filter = list(tags) if tags else []
 
+    def set_exclude_filter(self, tags):
+        """NOT フィルタ（このタグを持つ画像を除外する）を設定する。"""
+        self.exclude_filter = list(tags) if tags else []
+
+    def toggle_include_tag(self, tag_name):
+        """絞り込みタグの ON/OFF を切り替える。ONにすると除外側からは外す。"""
+        tag = str(tag_name or "").strip()
+        if not tag:
+            return False
+        if tag in self.active_filter:
+            self.active_filter.remove(tag)
+            return False
+        if tag in self.exclude_filter:
+            self.exclude_filter.remove(tag)
+        self.active_filter.append(tag)
+        return True
+
+    def toggle_exclude_tag(self, tag_name):
+        """除外タグの ON/OFF を切り替える。ONにすると絞り込み側からは外す。"""
+        tag = str(tag_name or "").strip()
+        if not tag:
+            return False
+        if tag in self.exclude_filter:
+            self.exclude_filter.remove(tag)
+            return False
+        if tag in self.active_filter:
+            self.active_filter.remove(tag)
+        self.exclude_filter.append(tag)
+        return True
+
+    def has_any_filter(self):
+        return bool(self.active_filter or self.exclude_filter)
+
     def clear_filter(self):
         self.active_filter = []
+        self.exclude_filter = []
 
     def set_active_target(self, file_path, image_hash=None):
         self.active_target = {"file_path": file_path, "image_hash": image_hash}
@@ -73,15 +108,20 @@ def collect_all_tags(tag_map):
     return sorted(all_tags)
 
 
-def filter_file_names_by_tags(file_names, path_to_hash, tag_map, selected_tags, mode="and"):
+def filter_file_names_by_tags(file_names, path_to_hash, tag_map, selected_tags, mode="and", exclude_tags=None):
     """ファイル一覧に対してタグ条件に合うものだけを返す。
 
     mode:
         - "and": すべての選択タグを含む
         - "or": いずれかの選択タグを含む
+
+    exclude_tags (NOT フィルタ):
+        ここに挙げたタグをひとつでも持つ画像は、mode によらず必ず除外する。
+        selected_tags が空でも exclude_tags だけで絞り込める。
     """
     selected = {tag.strip() for tag in (selected_tags or []) if str(tag).strip()}
-    if not selected:
+    excluded = {tag.strip() for tag in (exclude_tags or []) if str(tag).strip()}
+    if not selected and not excluded:
         return list(file_names)
 
     filtered = []
@@ -93,7 +133,14 @@ def filter_file_names_by_tags(file_names, path_to_hash, tag_map, selected_tags, 
         entry = (tag_map or {}).get(image_hash, {})
         raw_tags = entry.get("tag", "")
         tags = set(parse_tag_text(raw_tags))
-        if mode == "or":
+
+        # NOT フィルタが先。除外タグを持つなら他の条件を見るまでもない
+        if excluded and excluded.intersection(tags):
+            continue
+
+        if not selected:
+            filtered.append(file_name)
+        elif mode == "or":
             if selected.intersection(tags):
                 filtered.append(file_name)
         else:

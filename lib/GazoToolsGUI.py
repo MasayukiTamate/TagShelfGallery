@@ -101,6 +101,8 @@ class ThumbnailPanelWindow(tk.Toplevel):
         self.image_tab = image_tab
         self.show_images_var = tk.BooleanVar(value=True)
         self.untagged_only_var = tk.BooleanVar(value=False)
+        # NOT フィルタ（このタグを持つ画像を隠す）
+        self.exclude_tag_var = tk.StringVar(value="; ".join(tag_filter_state.exclude_filter))
 
         control = tk.Frame(settings_tab)
         control.pack(fill=tk.X, padx=5, pady=5)
@@ -120,6 +122,25 @@ class ThumbnailPanelWindow(tk.Toplevel):
             control, text="選択した画像にタグを付与",
             command=self._apply_tag_to_selection,
         ).grid(row=1, column=4, columnspan=4, sticky="w", padx=4, pady=(4, 0))
+
+        # --- NOT フィルタ（除外タグ） ---
+        tk.Label(control, text="除外タグ (NOT, ; 区切り):").grid(
+            row=2, column=0, columnspan=3, sticky="w", padx=4, pady=(8, 0))
+        exclude_entry = tk.Entry(control, textvariable=self.exclude_tag_var, width=30)
+        exclude_entry.grid(row=2, column=3, columnspan=4, sticky="we", padx=4, pady=(8, 0))
+        exclude_entry.bind("<Return>", lambda event: self._apply_exclude_input())
+        exclude_entry.bind("<FocusOut>", lambda event: self._apply_exclude_input())
+        tk.Button(
+            control, text="適用", command=self._apply_exclude_input,
+        ).grid(row=2, column=7, sticky="w", padx=4, pady=(8, 0))
+        tk.Button(
+            control, text="除外を解除", command=self._clear_exclude_input,
+        ).grid(row=2, column=8, sticky="w", padx=4, pady=(8, 0))
+        self.filter_status_var = tk.StringVar(value="")
+        tk.Label(
+            control, textvariable=self.filter_status_var, fg="#555555",
+            anchor="w", justify="left", wraplength=520,
+        ).grid(row=3, column=0, columnspan=9, sticky="w", padx=4, pady=(4, 0))
 
         self.canvas = tk.Canvas(image_tab, highlightthickness=0, bg="#202020")
         self.scrollbar = tk.Scrollbar(self, orient=tk.VERTICAL, command=self._scroll)
@@ -183,7 +204,55 @@ class ThumbnailPanelWindow(tk.Toplevel):
 
     def apply_filters(self):
         """タグ一覧窓側の絞り込み変更時に外部から呼ばれる再フィルタ処理。"""
+        self.sync_filter_inputs()
         self._apply_filters()
+
+    def sync_filter_inputs(self):
+        """共有のフィルタ状態を入力欄へ反映する（タグ一覧窓で変えられた時用）。"""
+        try:
+            self.exclude_tag_var.set("; ".join(tag_filter_state.exclude_filter))
+        except tk.TclError:
+            pass
+
+    def _apply_exclude_input(self):
+        """入力欄の除外タグを共有フィルタ状態へ反映して再描画する。"""
+        tags = parse_tag_text(self.exclude_tag_var.get())
+        if tags == list(tag_filter_state.exclude_filter):
+            return
+        tag_filter_state.set_exclude_filter(tags)
+        self.exclude_tag_var.set("; ".join(tags))
+        self._notify_filter_changed()
+
+    def _clear_exclude_input(self):
+        tag_filter_state.set_exclude_filter([])
+        self.exclude_tag_var.set("")
+        self._notify_filter_changed()
+
+    def _notify_filter_changed(self):
+        """自分を再描画しつつ、他の窓にも絞り込み変更を伝える。"""
+        self._apply_filters()
+        callback = getattr(self, "filter_changed_callback", None)
+        if callback:
+            try:
+                callback()
+            except Exception as exc:
+                logger.warning(f"フィルタ変更の通知に失敗: {exc}")
+
+    def _update_filter_status(self):
+        """いま効いている絞り込み条件を文字で見せる。"""
+        parts = []
+        if self.untagged_only_var.get():
+            parts.append("タグ未設定のみ")
+        if tag_filter_state.active_filter:
+            joiner = " または " if tag_filter_state.mode == "or" else " かつ "
+            parts.append("含む: " + joiner.join(tag_filter_state.active_filter))
+        if tag_filter_state.exclude_filter:
+            parts.append("除外: " + " / ".join(tag_filter_state.exclude_filter))
+        summary = " ｜ ".join(parts) if parts else "絞り込みなし"
+        try:
+            self.filter_status_var.set(f"{summary}  →  {len(self.files)}/{len(self.all_files)} 件")
+        except (tk.TclError, AttributeError):
+            pass
 
     def _tag_dict(self):
         return self.gazo_control.tag_dict if self.gazo_control and hasattr(self.gazo_control, 'tag_dict') else {}
@@ -209,16 +278,21 @@ class ThumbnailPanelWindow(tk.Toplevel):
         return result
 
     def _apply_filters(self):
+        # 「タグ未設定のみ」と「含む／除外タグ」は重ねて効くようにする
+        candidates = list(self.all_files)
         if self.untagged_only_var.get():
-            self.files = self._filter_untagged(self.all_files)
-        elif tag_filter_state.active_filter:
-            path_to_hash = self._build_path_to_hash(self.all_files)
-            self.files = filter_file_names_by_tags(
-                self.all_files, path_to_hash, self._tag_dict(),
+            candidates = self._filter_untagged(candidates)
+
+        if tag_filter_state.active_filter or tag_filter_state.exclude_filter:
+            path_to_hash = self._build_path_to_hash(candidates)
+            candidates = filter_file_names_by_tags(
+                candidates, path_to_hash, self._tag_dict(),
                 tag_filter_state.active_filter, tag_filter_state.mode,
+                exclude_tags=tag_filter_state.exclude_filter,
             )
-        else:
-            self.files = list(self.all_files)
+
+        self.files = candidates
+        self._update_filter_status()
         self.render()
 
     def _apply_tag_to_selection(self):
@@ -233,6 +307,7 @@ class ThumbnailPanelWindow(tk.Toplevel):
             return
         tag_dict = self._tag_dict()
         affected_hashes = []
+        tagged_paths = []
         for path in self.selected_paths:
             try:
                 image_hash = calculate_file_hash(path)
@@ -246,8 +321,16 @@ class ThumbnailPanelWindow(tk.Toplevel):
             entry["tag"] = "; ".join(sorted(existing | new_tags))
             entry["hint"] = os.path.basename(path)
             affected_hashes.append(image_hash)
+            tagged_paths.append(path)
         if affected_hashes:
             save_tags(tag_dict)
+            # Dolphin 互換の拡張属性へも書き出す
+            if self.gazo_control and hasattr(self.gazo_control, 'sync_xattr_for'):
+                for path in tagged_paths:
+                    try:
+                        self.gazo_control.sync_xattr_for(path, calculate_file_hash(path))
+                    except Exception as exc:
+                        logger.warning(f"Dolphinタグの書き出しに失敗: {path} ({exc})")
             if self.gazo_control and hasattr(self.gazo_control, 'set_image_tag'):
                 for open_win in self.gazo_control.open_windows.values():
                     if getattr(open_win, '_image_hash', None) in affected_hashes:
@@ -1146,12 +1229,9 @@ class TagEditorWindow(tk.Toplevel):
         quick_frame = tk.Frame(self)
         quick_frame.pack(fill="x", padx=10, pady=(6, 0))
         tk.Label(quick_frame, text="よく使うタグ:", anchor="w").pack(fill="x")
-        tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
-        quick_tags = sorted(collect_all_tags(tag_dict))[:12]
-        quick_inner = tk.Frame(quick_frame)
-        quick_inner.pack(fill="x")
-        for tag_name in quick_tags:
-            tk.Button(quick_inner, text=tag_name, font=("MS Gothic", 8), command=lambda t=tag_name: self._append_tag(t), padx=6, pady=2).pack(side=tk.LEFT, padx=2, pady=2)
+        self.quick_inner = tk.Frame(quick_frame)
+        self.quick_inner.pack(fill="x")
+        self.refresh_quick_tags()
 
         btn_frame = tk.Frame(self)
         btn_frame.pack(fill="x", padx=10, pady=10)
@@ -1160,6 +1240,17 @@ class TagEditorWindow(tk.Toplevel):
 
         self.bind("<Return>", lambda event: self._save_current_tag())
         self.bind("<Escape>", lambda event: self._clear_current_tag())
+
+    def refresh_quick_tags(self):
+        """「よく使うタグ」のボタンを現在のタグ辞書から作り直す。"""
+        for widget in self.quick_inner.winfo_children():
+            widget.destroy()
+        tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
+        for tag_name in sorted(collect_all_tags(tag_dict))[:12]:
+            tk.Button(
+                self.quick_inner, text=tag_name, font=("MS Gothic", 8),
+                command=lambda t=tag_name: self._append_tag(t), padx=6, pady=2,
+            ).pack(side=tk.LEFT, padx=2, pady=2)
 
     def set_target(self, file_path, image_hash=None):
         """フォーカス中の画像をタグ編集対象として設定し、表示を更新する。"""
@@ -1203,6 +1294,11 @@ class TagEditorWindow(tk.Toplevel):
         tag_dict[image_hash]["tag"] = normalized
         tag_dict[image_hash]["hint"] = os.path.basename(file_path)
         save_tags(tag_dict)
+        if hasattr(self.gazo_control, 'sync_xattr_for'):
+            try:
+                self.gazo_control.sync_xattr_for(file_path, image_hash)
+            except Exception as exc:
+                logger.warning(f"Dolphinタグの書き出しに失敗: {file_path} ({exc})")
         if hasattr(self.gazo_control, 'set_image_tag'):
             try:
                 for open_win in self.gazo_control.open_windows.values():
@@ -1263,7 +1359,11 @@ class TagEditorWindow(tk.Toplevel):
 
 
 class TagListWindow(tk.Toplevel):
-    """タグ一覧ウィンドウ。タグごとのファイル件数表示と絞り込みを行う。"""
+    """タグ一覧ウィンドウ。タグごとのファイル件数表示と絞り込みを行う。
+
+    ダブルクリックで「含む」、右クリックで「除外(NOT)」を切り替える。
+    どちらの状態も TagFilterState を通じてファイル一覧窓・サムネイル窓と共有する。
+    """
 
     def __init__(self, parent, gazo_control, on_filter_applied=None):
         super().__init__(parent)
@@ -1271,7 +1371,8 @@ class TagListWindow(tk.Toplevel):
         self.on_filter_applied = on_filter_applied
         self.title("タグ一覧")
         self.attributes("-topmost", True)
-        self.geometry("280x360")
+        self.geometry("360x420")
+        self._tag_names = []
 
         mode_frame = tk.Frame(self)
         mode_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
@@ -1281,29 +1382,51 @@ class TagListWindow(tk.Toplevel):
         tk.Radiobutton(mode_frame, text="OR", variable=self.mode_var, value="or", command=self._on_mode_change).pack(side=tk.LEFT)
         tk.Button(mode_frame, text="クリア", command=self._on_clear).pack(side=tk.RIGHT)
 
-        tk.Label(self, text="タグ一覧", font=("Helvetica", "10", "bold")).pack(pady=(0, 4))
+        tk.Label(self, text="タグ一覧", font=("Helvetica", "10", "bold")).pack(pady=(0, 2))
+        tk.Label(
+            self, text="Wクリック=含む(+) / 右クリック=除外(-)",
+            fg="#555555", font=("MS Gothic", 8),
+        ).pack(pady=(0, 4))
 
         list_frame = tk.Frame(self)
-        list_frame.pack(expand=True, fill=tk.BOTH, padx=8, pady=8)
+        list_frame.pack(expand=True, fill=tk.BOTH, padx=8, pady=(0, 4))
         scrollbar = tk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tag_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
+        hscrollbar = tk.Scrollbar(list_frame, orient=tk.HORIZONTAL)
+        hscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        # 長い階層タグ（例: H/恥じらい）が切れないよう横スクロールも付ける
+        self.tag_listbox = tk.Listbox(
+            list_frame, yscrollcommand=scrollbar.set, xscrollcommand=hscrollbar.set,
+        )
         self.tag_listbox.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
         scrollbar.config(command=self.tag_listbox.yview)
+        hscrollbar.config(command=self.tag_listbox.xview)
+
+        self.status_var = tk.StringVar(value="絞り込みなし")
+        tk.Label(
+            self, textvariable=self.status_var, anchor="w", justify="left",
+            wraplength=340, fg="#333333", font=("MS Gothic", 8),
+        ).pack(fill=tk.X, padx=8, pady=(0, 8))
 
         self.tag_listbox.bind("<Double-Button-1>", self._on_tag_double_click)
+        self.tag_listbox.bind("<Button-3>", self._on_tag_right_click)
         self.refresh_tag_list()
 
     def refresh_tag_list(self):
         self.tag_listbox.delete(0, tk.END)
+        self._tag_names = []
         tag_dict = self.gazo_control.tag_dict if hasattr(self.gazo_control, 'tag_dict') else {}
         tags = collect_all_tags(tag_dict)
         current_folder = app_state.current_folder
-        file_names = [
-            os.path.join(current_folder, name)
-            for name in os.listdir(current_folder)
-            if os.path.isfile(os.path.join(current_folder, name))
-        ]
+        try:
+            file_names = [
+                os.path.join(current_folder, name)
+                for name in os.listdir(current_folder)
+                if os.path.isfile(os.path.join(current_folder, name))
+            ]
+        except OSError as exc:
+            logger.warning(f"タグ一覧の対象フォルダを読めません: {current_folder} ({exc})")
+            file_names = []
         path_to_hash = {}
         for file_path in file_names:
             try:
@@ -1313,33 +1436,108 @@ class TagListWindow(tk.Toplevel):
 
         for tag_name in tags:
             matches = find_files_for_tag(file_names, path_to_hash, tag_dict, tag_name)
-            self.tag_listbox.insert(tk.END, f"{tag_name} ({len(matches)})")
+            self._tag_names.append(tag_name)
+            self.tag_listbox.insert(tk.END, self._format_row(tag_name, len(matches)))
+        self._apply_row_colors()
+        self._update_status()
+
+    def _format_row(self, tag_name, count):
+        if tag_name in tag_filter_state.active_filter:
+            marker = "[+]"
+        elif tag_name in tag_filter_state.exclude_filter:
+            marker = "[-]"
+        else:
+            marker = "[ ]"
+        return f"{marker} {tag_name} ({count})"
+
+    def _redraw_rows(self):
+        """件数を数え直さずに、含む/除外のマーカーだけ更新する。"""
+        for index, tag_name in enumerate(self._tag_names):
+            try:
+                current = self.tag_listbox.get(index)
+            except tk.TclError:
+                continue
+            count_part = current.rsplit("(", 1)[-1].rstrip(")")
+            marker = "[+]" if tag_name in tag_filter_state.active_filter else (
+                "[-]" if tag_name in tag_filter_state.exclude_filter else "[ ]")
+            self.tag_listbox.delete(index)
+            self.tag_listbox.insert(index, f"{marker} {tag_name} ({count_part})")
+        self._apply_row_colors()
+        self._update_status()
+
+    def _apply_row_colors(self):
+        for index, tag_name in enumerate(self._tag_names):
+            if tag_name in tag_filter_state.active_filter:
+                color = "#1b5e20"
+            elif tag_name in tag_filter_state.exclude_filter:
+                color = "#b71c1c"
+            else:
+                color = "#000000"
+            try:
+                self.tag_listbox.itemconfig(index, foreground=color)
+            except tk.TclError:
+                continue
+
+    def _update_status(self):
+        parts = []
+        if tag_filter_state.active_filter:
+            joiner = " または " if tag_filter_state.mode == "or" else " かつ "
+            parts.append("含む: " + joiner.join(tag_filter_state.active_filter))
+        if tag_filter_state.exclude_filter:
+            parts.append("除外: " + " / ".join(tag_filter_state.exclude_filter))
+        self.status_var.set(" ｜ ".join(parts) if parts else "絞り込みなし")
+
+    def _tag_at_event(self, event):
+        try:
+            index = self.tag_listbox.nearest(event.y)
+        except tk.TclError:
+            return None
+        if index < 0 or index >= len(self._tag_names):
+            return None
+        return index
+
+    def _notify(self):
+        if self.on_filter_applied:
+            try:
+                self.on_filter_applied()
+            except Exception as exc:
+                logger.warning(f"絞り込み反映に失敗: {exc}")
 
     def _on_mode_change(self):
         tag_filter_state.set_mode(self.mode_var.get())
-        if self.on_filter_applied:
-            self.on_filter_applied()
+        self._update_status()
+        self._notify()
 
     def _on_clear(self):
         tag_filter_state.clear_filter()
-        if self.on_filter_applied:
-            self.on_filter_applied()
+        self._redraw_rows()
+        self._notify()
 
     def _on_tag_double_click(self, event):
+        """ダブルクリックで「含む」タグを切り替える。"""
         try:
-            idx = self.tag_listbox.curselection()
-            if not idx:
+            index = self._tag_at_event(event)
+            if index is None:
                 return
-            selected_text = self.tag_listbox.get(idx[0])
-            tag_name = selected_text.rsplit(" (", 1)[0]
-
-            tag_filter_state.set_active_filter([tag_name])
-            if self.on_filter_applied:
-                self.on_filter_applied()
-
-            messagebox.showinfo("タグ検索", f"タグ '{tag_name}' を適用して一覧を更新しました")
+            tag_filter_state.toggle_include_tag(self._tag_names[index])
+            self._redraw_rows()
+            self._notify()
         except Exception as e:
-            logger.warning(f"タグ詳細表示エラー: {e}")
+            logger.warning(f"タグ絞り込みエラー: {e}")
+
+    def _on_tag_right_click(self, event):
+        """右クリックで「除外(NOT)」タグを切り替える。"""
+        try:
+            index = self._tag_at_event(event)
+            if index is None:
+                return
+            self.tag_listbox.selection_clear(0, tk.END)
+            self.tag_listbox.selection_set(index)
+            tag_filter_state.toggle_exclude_tag(self._tag_names[index])
+            self._redraw_rows()
+            self._notify()
+        except Exception as e:
+            logger.warning(f"タグ除外設定エラー: {e}")
 
 
 class ShortcutKeyBarWindow(tk.Toplevel):

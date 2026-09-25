@@ -43,6 +43,7 @@ MOVE_GRID_COLUMNS_MULTI = 3   # 4個以上の時の列数
 MOVE_GRID_COLUMNS_SINGLE = 2  # 2-3個の時の列数
 
 SHORTCUT_TAG_KEY_COUNT = 9    # タグ割り当てショートカットキー数（1〜9キー）
+TAG_FILTER_PANEL_HEIGHT = 120  # ファイル一覧窓のタグフィルタ欄の高さ(px)。超えた分はスクロール
 
 
 # ===========================
