@@ -163,6 +163,10 @@ except Exception as e:
 # ショートカット用の変数（後方互換性）
 DEFOLDER = app_state.current_folder
 SAVED_GEOS = app_state.window_geometries
+
+# 窓の自動配置は、保存された位置がまだ無い初回だけ行う。
+# 一度置いた窓は更新のたびに動かさず、ユーザーが決めた座標を保つ。
+_auto_layout_pending = not (SAVED_GEOS.get("folder") and SAVED_GEOS.get("file"))
 SAVED_SETTINGS = {
     "random_pos": app_state.random_pos,
     "random_size": app_state.random_size,
@@ -292,7 +296,10 @@ def refresh_ui(new_path):
                 if window in thumbnail_windows:
                     thumbnail_windows.remove(window)
 
-    if 'folder_win' in globals() and 'file_win' in globals():
+    # 更新のたびに窓を動かさない。位置が未設定の初回だけ自動配置する。
+    global _auto_layout_pending
+    if _auto_layout_pending and 'folder_win' in globals() and 'file_win' in globals():
+        _auto_layout_pending = False
         adjust_window_layouts(folders, files)
 
 def adjust_window_layouts(folders, files):
@@ -1614,6 +1621,36 @@ if SAVED_GEOS.get("tag_window"):
 if SAVED_GEOS.get("tag_edit_window"):
     tag_edit_window.geometry(SAVED_GEOS["tag_edit_window"])
 
+
+def restore_saved_window_positions():
+    """保存しておいた窓の位置を入れ直す。
+
+    ウィンドウマネージャによっては、まだ画面に出ていない窓への位置指定が
+    無視され、表示されるときに別の場所へ置かれることがある。
+    表示が済んでからもう一度指定して、前回終了時の配置に戻す。
+    """
+    targets = [
+        ("main", koRoot),
+        ("folder", folder_win),
+        ("file", file_win),
+        ("vector_window_geometry", vector_window),
+        ("shortcut_key_bar", shortcut_bar_window),
+        ("tag_window", tag_window),
+        ("tag_edit_window", tag_edit_window),
+    ]
+    if thumbnail_windows:
+        targets.append(("thumbnail", thumbnail_windows[0]))
+
+    for key, window in targets:
+        geometry = SAVED_GEOS.get(key)
+        if not geometry:
+            continue
+        try:
+            window.geometry(geometry)
+        except tk.TclError:
+            continue
+
+
 update_visibility()
 
 if app_state.show_thumbnail_window:
@@ -1787,6 +1824,9 @@ koRoot.bind_all("<Control-r>", on_ctrl_r)
 koRoot.bind_all("<Control-e>", on_ctrl_e)
 koRoot.bind_all("<Control-t>", on_ctrl_t)
 koRoot.bind_all("<Control-i>", on_ctrl_i)
+
+# 窓が画面に出てから、保存しておいた位置をもう一度当てる
+koRoot.after(100, restore_saved_window_positions)
 
 if ss_mode.get():
     koRoot.after(1000, auto_slideshow)
